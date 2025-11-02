@@ -1,8 +1,10 @@
 FROM debian:latest
 RUN apt-get update && apt-get install -y \
     openvpn \
-    python3 \ 
-    docker.io
+    python3
+
+COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/
+
 RUN apt-get update && apt-get install -y \
     python3-jinja2 \
     python3-requests \
