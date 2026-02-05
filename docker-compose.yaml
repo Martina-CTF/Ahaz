@@ -3,7 +3,7 @@ services:
     depends_on:
       k8s_controller_db:
         condition: service_started
-    image: martina-ctf/ahaz_k8s_controller:latest
+    image: ghcr.io/martina-ctf/ahaz:latest
     build:
       context: .
       dockerfile: ./Dockerfile.controller
@@ -73,7 +73,7 @@ services:
     image: redis:4
     restart: always
     volumes:
-    - ./ahaz_data/redis:/data
+      - ./ahaz_data/redis:/data
     networks:
       ahaz_db_connection:
         ipv4_address: 10.33.0.4
