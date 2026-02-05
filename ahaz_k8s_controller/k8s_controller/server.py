@@ -181,7 +181,8 @@ async def team_post():
     return "Started team creation as a thread"
 
 
-async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:
+# TODO: Reduce complexity here
+async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:  # noqa: C901
     redis_event_mgr = RedisEventManager(REDIS_URL)
 
     # HACK: Function in function is ugly, but need this working for 21.11.2025 :3
@@ -203,7 +204,9 @@ async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:
             port = (
                 TEAM_PORT_RANGE_START + int(request_data.team_id)  # HACK: GOD PLEASE HAVE GOOD INPUTS ONLY
             )
-        except:
+        except Exception as e:
+            logger.error(f"Invalid team_id for port calculation: {request_data.team_id}")
+            logger.error(e)
             port = TEAM_PORT_RANGE_START
     try:
         if dboperator.get_registration_progress_team(request_data.team_id) == 10:
@@ -381,7 +384,7 @@ async def del_team():
 async def events():
     async def event_stream():
         # Immediate ping to establish connection and send headers
-        yield f":keepalive\n\n"
+        yield ":keepalive\n\n"
         pubsub = redis_event_manager.subscribe()
         await pubsub.subscribe("ahaz_events")
         while True:
@@ -389,21 +392,22 @@ async def events():
             # keepalive pings in case the client thinks the connection is dead
             message = await pubsub.get_message(timeout=5)
             if message is None:
-                yield f":keepalive\n\n"
+                yield ":keepalive\n\n"
                 continue
 
             if message["type"] == "message":
                 try:
                     parsed = json.loads(message["data"].decode("utf-8"))
-                except:
-                    # Invalid data provided.
+                except Exception as e:
+                    logger.error(f"Invalid data provided: {e}")
                     continue
                 response = ""
                 data = json.dumps(parsed["data"])
                 for line in data.splitlines():
                     response += f"data: {line}\n"
                 response += f"event: {parsed['type']}\n"
-                yield f"{response}\n"  # We trust that no one else is writing to the Redis publisher and we only write valid JSON
+                # We trust that no one else is writing to the Redis publisher and we only write valid JSON
+                yield f"{response}\n"
 
     response = await make_response(
         event_stream(),
@@ -415,7 +419,8 @@ async def events():
         },
     )
 
-    # Disable timeout for long-lived connections (trust me, the attribute exists. don't listen to the type checker)
+    # Disable timeout for long-lived connections
+    # (trust me, the attribute exists. don't listen to the type checker)
     response.timeout = None  # type: ignore
 
     return response

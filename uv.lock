@@ -49,7 +49,7 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.12.3" }]
 
 [[package]]
 name = "ahaz-k8s-controller"
-version = "0.0.1"
+version = "1.0.0"
 source = { virtual = "ahaz_k8s_controller" }
 dependencies = [
     { name = "ahaz-common" },

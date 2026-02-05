@@ -7,7 +7,6 @@ import os
 import re
 import subprocess
 import tarfile
-import tempfile
 from os import getenv, listdir, makedirs, path
 from shutil import rmtree
 from typing import Any, Generator

@@ -17,5 +17,12 @@
     "python.analysis.typeCheckingMode": "standard",
     "python.analysis.autoImportCompletions": true,
     "python.analysis.diagnosticMode": "workspace",
-    "python-envs.pythonProjects": []
+    "python-envs.pythonProjects": [],
+    // Same as above, but for BasedPyright, in case we're on Codium that doesn't support the Python extension. :p
+    "basedpyright.analysis.diagnosticMode": "workspace",
+    "basedpyright.analysis.autoImportCompletions": true,
+    "basedpyright.analysis.typeCheckingMode": "standard",
+    "basedpyright.analysis.extraPaths": [
+        "${workspaceFolder}/ahaz_common"
+    ]
 }
