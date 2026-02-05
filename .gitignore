@@ -23,3 +23,6 @@ ahaz_data/redis/*
 
 # Docker Compose override
 docker-compose.override.yaml
+
+# Ruff cache
+.ruff_cache/
