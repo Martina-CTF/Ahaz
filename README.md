@@ -77,6 +77,28 @@ kubectl taint nodes <node-name> ahaz-controller/node-role=NoExecute:task
 kubectl label nodes <node-name> ahaz-controller/node-role=task
 ```
 
+# Kubernetes cluster for dummies
+*Theoretically*, any k8s cluster will work. The general recommendation is to run a development cluster on a virtual machine or on a machine that has nothing else on it.
+
+## k3s
+It is recommended use k3s for the cluster, as it is lightweight and simple to install and setup. You can follow their installation instructions here: [docs.k3s.io](https://docs.k3s.io). Check out their documentation on "Cluster Access > Accessing the Cluster from Outside with Kubectl" so you don't have to do everything through SSH.
+
+### Caveat
+If you are using a custom domain for your k3s cluster, like `ahaz.lan`, make sure to change k3s's startup command (`/etc/systemd/system/k3s.service` on systemd based distros) to include `--tls-san <your domain name here>`.
+
+## Tell Ahaz how to manage your cluster
+Ahaz requires access to your cluster to spin up containers, configure their network policies, etc.
+The simplest way to do this is by providing the config (see aforementioned k3s docs on cluster access) as a `./ahaz_data/kubectl/config` file. See the `./ahaz_data/kubectl/config.example.yml` file to see how it should look. Make the necessary changes for a custom domain if you're using one (see above).
+
+<!-- TODO
+## Add testing challenges to Ahaz
+
+blah blah blah
+use ahaz cli
+use endpoints
+blah blah blah
+-->
+
 # Updating/Inserting Challenges
 To update or insert challenges into the Ahaz database, you may use a MySQL client to connect to the database and execute the necessary SQL commands.
 
