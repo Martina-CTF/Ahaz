@@ -1,34 +1,52 @@
+from contextlib import contextmanager
 import datetime
 import logging
 from os import getenv
+from typing import Any, Iterator
 
-from mysql.connector import pooling
+from psycopg import Connection
+from psycopg.cursor import Cursor
+from psycopg_pool import ConnectionPool
+
+logger = logging.getLogger()
+
 
 DB_IP = getenv("DB_IP", "10.33.0.3")
 DB_DBNAME = getenv("DB_DBNAME", "ahaz")
 DB_USERNAME = getenv("DB_USERNAME", "dbeaver")
-DB_PASSWORD = getenv("DB_PASSWORD", "dbeaver")
 K8S_IP_RANGE = getenv("K8S_IP_RANGE", "10.42.0.0 255.255.0.0")
-
-logger = logging.getLogger()
+DB_PASSWORD = getenv("DB_PASSWORD")
+if DB_PASSWORD is None:
+    DB_PASSWORD_FILE = getenv("DB_PASSWORD_FILE", "/run/secrets/db_password")
+    with open(DB_PASSWORD_FILE, "r") as f:
+        DB_PASSWORD = f.read()
+else:
+    logger.warning("The DB_PASSWORD environment variable is deprecated for Ahaz")
 
 pool = None
 
 
-def get_connection() -> pooling.PooledMySQLConnection:
+@contextmanager
+def get_connection() -> Iterator[tuple[Connection, Cursor[Any]]]:
+    DB_CONNECTION_TIMEOUT = 1
+
     global pool
     if pool is None:
         logger.debug("Initializing connection pool")
-        pool = pooling.MySQLConnectionPool(
-            pool_name="mypool",
-            pool_size=10,
-            pool_reset_session=True,
-            host=DB_IP,
-            database=DB_DBNAME,
-            user=DB_USERNAME,
-            password=DB_PASSWORD,
+        pool = ConnectionPool(
+            f"host={DB_IP} dbname={DB_DBNAME} user={DB_USERNAME} password={DB_PASSWORD}",
+            # TODO: Implement core-counted pool size
+            # See: https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing
+            min_size=4,
+            max_size=16,
+            max_idle=60,  # One minute
+            max_waiting=4,  # Allow 4 waiting for a connection before creating a new connection
         )
-    return pool.get_connection()
+    try:
+        with pool.connection(timeout=DB_CONNECTION_TIMEOUT) as conn, conn.cursor() as cur:
+            yield conn, cur
+    except:
+        pass
 
 
 def getUTCasStr() -> str:
@@ -36,21 +54,21 @@ def getUTCasStr() -> str:
 
 
 def get_challenges_from_db() -> list[str]:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         cursor.execute("SELECT name FROM challenges")
         rows = cursor.fetchall()
     return [str(row[0]) for row in rows]
 
 
 def get_pods(name: str) -> list[tuple]:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         cursor.execute("SELECT * FROM pods WHERE name = %s", (name,))
         rows = cursor.fetchall()
     return list(rows)
 
 
 def get_env_vars(k8s_name: str) -> list[dict]:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         cursor.execute("SELECT env_var_name, env_var_value FROM env_vars WHERE k8s_name = %s", (k8s_name,))
         rows = cursor.fetchall()
 
@@ -61,7 +79,7 @@ def get_env_vars(k8s_name: str) -> list[dict]:
 
 
 def get_k8s_name_networks(k8s_name: str) -> list[str]:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         cursor.execute("SELECT netname FROM net_rules WHERE k8s_name = %s", (k8s_name,))
         rows = cursor.fetchall()
 
@@ -72,14 +90,14 @@ def get_k8s_name_networks(k8s_name: str) -> list[str]:
 
 
 def get_unique_networks(challengename: str) -> list[str]:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         cursor.execute("SELECT DISTINCT netname FROM net_rules WHERE name = %s", (challengename,))
         rows = cursor.fetchall()
     return [str(row[0]) for row in rows]
 
 
 def get_pods_in_network(challengename: str, netname: str) -> list[str]:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         cursor.execute(
             "SELECT k8s_name FROM net_rules WHERE netname = %s AND name = %s", (netname, challengename)
         )
@@ -88,7 +106,7 @@ def get_pods_in_network(challengename: str, netname: str) -> list[str]:
 
 
 def get_challenge_from_k8s_name(k8s_name: str) -> str:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         # FIXME: Add limit=1 to the query to avoid fetching unnecessary rows
         cursor.execute("SELECT name FROM pods WHERE k8s_name = %s", (k8s_name,))
         rows = cursor.fetchall()
@@ -96,7 +114,7 @@ def get_challenge_from_k8s_name(k8s_name: str) -> str:
 
 
 def insert_team_into_db(teamname: str) -> None:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         if get_team_id(teamname) != "null":
             raise ValueError("team with that name already exists in db")
         cursor.execute("INSERT INTO teams (name) VALUES (%s)", (teamname,))
@@ -108,7 +126,7 @@ def insert_vpn_port_into_db(teamname: str, port: int) -> str | None:
         return "team already has port allocated to it"
     if get_port_team(port) != "null":
         return "port " + str(port) + " is already allocated"
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         teamid = get_team_id(teamname)
         cursor.execute("INSERT INTO vpn_map(port,teamid) VALUES (%s, %s)", (port, teamid))
         conn.commit()
@@ -144,7 +162,7 @@ def insert_user_vpn_config(teamname: str, username: str, config: str) -> None:
     config = config.replace("redirect-gateway def1", "")  # remove the rule that replaces all routes with VPN
     config = config + "\ncomp-lzo yes\nallow-compression yes"
 
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         teamid = get_team_id(teamname)
         cursor.execute(
             "INSERT INTO vpn_storage(teamID,username,config) VALUES (%s, %s, %s)", (teamid, username, config)
@@ -153,7 +171,7 @@ def insert_user_vpn_config(teamname: str, username: str, config: str) -> None:
 
 
 def get_team_id(teamname: str) -> str:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         # FIXME: Add limit=1 to the query to avoid fetching unnecessary rows
         # TODO: implement sanitization here
         cursor.execute("SELECT teamID FROM teams WHERE name=%s", (teamname,))
@@ -167,7 +185,7 @@ def get_team_id(teamname: str) -> str:
 
 def get_team_port(teamname: str) -> str:
     teamID = get_team_id(teamname)
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         # FIXME: Add limit=1 to the query to avoid fetching unnecessary rows
         cursor.execute("SELECT port FROM vpn_map WHERE teamID=%s", (teamID,))
         rows = cursor.fetchall()
@@ -179,7 +197,7 @@ def get_team_port(teamname: str) -> str:
 
 
 def get_port_team(port: int) -> str:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         # FIXME: Add limit=1 to the query to avoid fetching unnecessary rows
         cursor.execute("SELECT teamID FROM vpn_map WHERE port=%s", (port,))
         rows = cursor.fetchall()
@@ -192,7 +210,7 @@ def get_port_team(port: int) -> str:
 
 def get_user_vpn_config(teamname: str, username: str) -> str:
     teamID = get_team_id(teamname)
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         # FIXME: Add limit=1 to the query to avoid fetching unnecessary rows
         cursor.execute("SELECT config FROM vpn_storage WHERE teamID=%s and username=%s", (teamID, username))
         rows = cursor.fetchall()
@@ -204,7 +222,7 @@ def get_user_vpn_config(teamname: str, username: str) -> str:
 
 
 def get_last_port() -> int:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         # FIXME: Add limit=1 to the query to avoid fetching unnecessary rows
         cursor.execute("SELECT port FROM vpn_map ORDER BY port DESC")
         rows = cursor.fetchall()
@@ -214,7 +232,7 @@ def get_last_port() -> int:
 
 def delete_team_and_vpn(teamname: str) -> None:
     teamID = get_team_id(teamname)
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         cursor.execute("DELETE from register_status WHERE name = %s", (teamname,))
         cursor.execute("DELETE FROM vpn_map WHERE teamID = %s", (teamID,))
         cursor.execute("DELETE FROM vpn_storage WHERE teamID = %s", (teamID,))
@@ -223,8 +241,8 @@ def delete_team_and_vpn(teamname: str) -> None:
 
 
 def get_registration_progress_team(teamname: str) -> int:
-    with get_connection() as conn, conn.cursor() as cursor:
-        cursor.execute("SELECT state FROM register_status WHERE name='" + teamname + "' ORDER BY state DESC")
+    with get_connection() as (conn, cursor):
+        cursor.execute("SELECT state FROM register_status WHERE name=%s ORDER BY state DESC", (teamname,))
         rows = cursor.fetchall()
 
     if len(rows) == 0 or len(rows[0]) == 0:
@@ -233,7 +251,7 @@ def get_registration_progress_team(teamname: str) -> int:
 
 
 def get_registration_progress_user(teamname: str, username: str) -> str:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         cursor.execute(
             "SELECT state FROM register_status WHERE name=%s and user=%s ORDER BY state DESC",
             (teamname, username),
@@ -245,7 +263,7 @@ def get_registration_progress_user(teamname: str, username: str) -> str:
 
 
 def set_registration_progress_team(teamname: str, username: str, status: int) -> None:
-    with get_connection() as conn, conn.cursor() as cursor:
+    with get_connection() as (conn, cursor):
         cursor.execute(
             "INSERT INTO register_status (name, user, state, timestamp) VALUES (%s, %s, %s, %s)",
             (teamname, username, status, getUTCasStr()),
