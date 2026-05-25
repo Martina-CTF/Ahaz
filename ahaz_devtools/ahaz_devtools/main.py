@@ -79,6 +79,15 @@ def init_cluster():
 
 
 def delete_cluster():
+    # Seemingly redundant, but why not!
+    if not is_kind_installed():
+        logger.error("Kind is not installed. Please install Kind to proceed.")
+        sys.exit(1)
+
+    if not docker_is_available():
+        logger.error("Docker is not available. Please ensure Docker is running and accessible to proceed.")
+        sys.exit(1)
+
     delete_kind_cluster()
 
     delete_local_registry()
