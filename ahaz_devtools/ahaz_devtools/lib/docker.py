@@ -73,7 +73,15 @@ def delete_local_registry():
 def build_and_push_ahaz_image():
     logger.info("Building Ahaz controller image...")
 
-    dockerfile_path = Path(__file__).resolve().parent.parent.parent.parent / "Dockerfile.controller"
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    dockerfile = project_root / "Dockerfile.controller"
+
+    # Test if the Dockerfile exists before trying to build the image
+    if not dockerfile.exists():
+        logger.error(
+            f"Dockerfile not found at {dockerfile}. Cannot build Ahaz image, are you refactoring something?"
+        )
+        return
 
     # HACK: the Docker library doesn't do buildkit
     # not doing buildkit for some unfathomable reason breaks Ahaz
@@ -85,8 +93,8 @@ def build_and_push_ahaz_image():
             "-t",
             f"localhost:{REGISTRY_PORT}/ahaz:latest",
             "-f",
-            str(dockerfile_path),
-            ".",
+            str(dockerfile),
+            str(project_root),
         ],
         logger,
         log_level=logging.INFO,
