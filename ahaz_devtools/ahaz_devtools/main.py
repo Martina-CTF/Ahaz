@@ -1,3 +1,4 @@
+import argparse
 import logging
 import os
 import signal
@@ -32,6 +33,22 @@ logger = logging.getLogger()
 logger.addHandler(rich.logging.RichHandler(markup=True))
 logger.setLevel(logging.INFO)
 
+# define and parse command line arguments
+argparser = argparse.ArgumentParser(description="Initialize the Kubernetes cluster and deploy Ahaz.")
+argparser.add_argument(
+    "-c",
+    "--chart",
+    help="Path to the Helm chart to deploy Ahaz with",
+    default="oci://ghcr.io/martina-ctf/helm-charts/ahaz",
+)
+argparser.add_argument(
+    "-p", "--ahaz-port", help="Local port to forward Ahaz API to (default: 8080)", default=8080, type=int
+)
+argparser.add_argument(
+    "--registry-port", help="Port for the local Docker registry (default: 6767)", default=6767, type=int
+)
+args = argparser.parse_args()
+
 
 def init_cluster():
     if not is_kind_installed():
@@ -48,7 +65,7 @@ def init_cluster():
 
     create_kind_cluster()
 
-    create_local_registry()
+    create_local_registry(args.registry_port)
 
     setup_local_registry_in_kind()
 
@@ -56,9 +73,9 @@ def init_cluster():
 
     install_kyverno()
 
-    build_and_push_ahaz_image()
+    build_and_push_ahaz_image(args.registry_port)
 
-    install_ahaz()
+    install_ahaz(args.chart)
 
 
 def delete_cluster():
@@ -72,17 +89,17 @@ def build(forward=True):
         logger.error("Docker is not available. Please ensure Docker is running and accessible to proceed.")
         sys.exit(1)
 
-    build_and_push_ahaz_image()
+    build_and_push_ahaz_image(args.registry_port)
     restart_ahaz()
     if forward:
-        logger.info("Forwarding Ahaz API to localhost:8080...")
-        forward_ahaz_port()
+        logger.info(f"Forwarding Ahaz API to localhost:{args.ahaz_port}...")
+        forward_ahaz_port(args.ahaz_port)
 
 
 def watch_forward():
-    logger.info("Forwarding Ahaz API to localhost:8080...")
+    logger.info(f"Forwarding Ahaz API to localhost:{args.ahaz_port}...")
     while True:
-        forward_ahaz_port()
+        forward_ahaz_port(args.ahaz_port)
 
 
 # Watches root directory for changes and rebuilds and redeploys Ahaz on change

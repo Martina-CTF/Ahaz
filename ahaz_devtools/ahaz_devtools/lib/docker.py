@@ -7,7 +7,7 @@ import docker
 import docker.errors
 from ahaz_devtools.lib.subprocess import execute_into_logger
 
-from .config import REGISTRY_NAME, REGISTRY_PORT
+from .config import REGISTRY_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def docker_check_registry():
         return False
 
 
-def create_local_registry():
+def create_local_registry(port: int):
     logger.info("Creating local Docker registry...")
 
     if docker_check_registry():
@@ -50,7 +50,7 @@ def create_local_registry():
         name=REGISTRY_NAME,
         detach=True,
         restart_policy={"Name": "always"},
-        ports={"5000/tcp": ("127.0.0.1", REGISTRY_PORT)},
+        ports={"5000/tcp": ("127.0.0.1", port)},
     )
     while run_logs.status != "running":
         run_logs.reload()
@@ -70,7 +70,7 @@ def delete_local_registry():
     logger.info("Local Docker registry deleted successfully.")
 
 
-def build_and_push_ahaz_image():
+def build_and_push_ahaz_image(registry_port: int):
     logger.info("Building Ahaz controller image...")
 
     project_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -91,7 +91,7 @@ def build_and_push_ahaz_image():
             "docker",
             "build",
             "-t",
-            f"localhost:{REGISTRY_PORT}/ahaz:latest",
+            f"localhost:{registry_port}/ahaz:latest",
             "-f",
             str(dockerfile),
             str(project_root),
@@ -106,7 +106,7 @@ def build_and_push_ahaz_image():
         [
             "docker",
             "push",
-            f"localhost:{REGISTRY_PORT}/ahaz:latest",
+            f"localhost:{registry_port}/ahaz:latest",
         ],
         logger,
     )

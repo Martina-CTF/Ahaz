@@ -282,7 +282,7 @@ def install_kyverno():
         raise
 
 
-def install_ahaz():
+def install_ahaz(chart: str):
     try:
         logger.info("Installing Ahaz...")
         execute_into_logger(
@@ -290,7 +290,7 @@ def install_ahaz():
                 "helm",
                 "install",
                 "ahaz",
-                "oci://ghcr.io/martina-ctf/helm-charts/ahaz",
+                chart,
                 "--namespace",
                 "ahaz",
                 "--create-namespace",
@@ -312,11 +312,11 @@ def install_ahaz():
         raise
 
 
-def forward_ahaz_port():
+def forward_ahaz_port(port: int):
     try:
         # HACK: Python Kubernetes client's portforwarding functionality is dogshit awful, so this stays.
         execute_into_logger(
-            ["kubectl", "port-forward", "svc/ahaz", "8080:5000", "-n", "ahaz"],
+            ["kubectl", "port-forward", "svc/ahaz", f"{port}:5000", "-n", "ahaz"],
             logger,
         )
     except subprocess.CalledProcessError as e:
