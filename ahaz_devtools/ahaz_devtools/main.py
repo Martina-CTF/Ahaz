@@ -17,6 +17,7 @@ from .lib.docker import (
     docker_is_available,
 )
 from .lib.kubernetes import (
+    check_for_cluster,
     create_kind_cluster,
     delete_kind_cluster,
     forward_ahaz_port,
@@ -61,6 +62,10 @@ def init_cluster():
 
     if not docker_is_available():
         logger.error("Docker is not available. Please ensure Docker is running and accessible to proceed.")
+        sys.exit(1)
+
+    if check_for_cluster():
+        logger.info("Kind cluster already exists. Remove the existing one before creating a new one.")
         sys.exit(1)
 
     create_kind_cluster()

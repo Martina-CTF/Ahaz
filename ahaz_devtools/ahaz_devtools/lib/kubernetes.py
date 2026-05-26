@@ -139,6 +139,25 @@ def is_kubectl_installed():
     return shutil.which("kubectl") is not None
 
 
+def check_for_cluster():
+    try:
+        logger.info("Checking for existing Kubernetes cluster...")
+        result = subprocess.run(
+            ["kind", "get", "clusters"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if "ahaz-dev" in result.stdout.splitlines():
+            logger.info("Existing 'ahaz-dev' cluster found.")
+            return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to check for existing cluster: {e}")
+        raise
+
+
 def create_kind_cluster():
     try:
         logger.info("Creating kind cluster 'ahaz-dev'...")
