@@ -153,6 +153,7 @@ def check_for_cluster():
         if "ahaz-dev" in result.stdout.splitlines():
             logger.info("Existing 'ahaz-dev' cluster found.")
             return True
+        return False
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to check for existing cluster: {e}")
         raise
