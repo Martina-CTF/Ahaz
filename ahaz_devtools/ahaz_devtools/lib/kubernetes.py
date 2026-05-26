@@ -65,6 +65,8 @@ def track_daemonset_rollout(namespace: str, name: str):
                     f"{ds.status.number_ready or 0}/{ds.status.desired_number_scheduled}"
                 ),
             )
+
+            sleep(0.5)  # Wait for a bit before asking again
         progress.update(task, description=f"DaemonSet {name} is ready!")
 
 
@@ -101,6 +103,8 @@ def track_deployment_rollout(namespace: str, name: str, target_gen: int | None =
                     f"Deployment {name} ready: {deploy.status.ready_replicas or 0}/{deploy.status.replicas}"
                 ),
             )
+
+            sleep(0.5)  # Wait for a bit before asking again
         progress.update(task, description=f"Deployment {name} is ready!")
 
 
