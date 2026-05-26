@@ -1,5 +1,6 @@
 import logging
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -81,7 +82,7 @@ def build_and_push_ahaz_image(registry_port: int):
         logger.error(
             f"Dockerfile not found at {dockerfile}. Cannot build Ahaz image, are you refactoring something?"
         )
-        return
+        sys.exit(1)
 
     # HACK: the Docker library doesn't do buildkit
     # not doing buildkit for some unfathomable reason breaks Ahaz
