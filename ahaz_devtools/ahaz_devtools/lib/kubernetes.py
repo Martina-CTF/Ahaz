@@ -1,6 +1,7 @@
 import logging
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from time import sleep
@@ -132,6 +133,10 @@ def is_kind_installed():
 
 def is_helm_installed():
     return shutil.which("helm") is not None
+
+
+def is_kubectl_installed():
+    return shutil.which("kubectl") is not None
 
 
 def create_kind_cluster():
@@ -313,6 +318,10 @@ def install_ahaz(chart: str):
 
 
 def forward_ahaz_port(port: int):
+    if not is_kubectl_installed():
+        logger.error("kubectl is not installed or not in PATH. Port forwarding requires kubectl.")
+        sys.exit(1)
+
     try:
         # HACK: Python Kubernetes client's portforwarding functionality is dogshit awful, so this stays.
         execute_into_logger(
