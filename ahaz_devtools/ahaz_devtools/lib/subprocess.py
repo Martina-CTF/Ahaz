@@ -3,7 +3,9 @@ from logging import DEBUG, Logger
 from typing import Optional
 
 
-def execute_into_logger(command: list[str], logger: Logger, log_level=DEBUG, input: Optional[str] = None):
+def execute_into_logger(
+    command: list[str], logger: Logger, log_level=DEBUG, input: Optional[str] = None, check: bool = True
+):
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -26,5 +28,10 @@ def execute_into_logger(command: list[str], logger: Logger, log_level=DEBUG, inp
             break
         if output:
             logger.log(log_level, output.strip(), stacklevel=2)
+
+    # Simulate the same behaviour as subprocess.run()'s check=True
+    if process.returncode != 0 and check:
+        logger.error(f"Command '{' '.join(command)}' failed with return code {process.returncode}")
+        raise subprocess.CalledProcessError(process.returncode, command)
 
     return process.poll()
