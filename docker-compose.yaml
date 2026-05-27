@@ -1,7 +1,7 @@
 services:
-  k8s_controller:
+  controller:
     depends_on:
-      k8s_controller_db:
+      db:
         condition: service_started
     image: ghcr.io/martina-ctf/ahaz:latest
     build:
@@ -14,11 +14,11 @@ services:
       - ./ahaz_data/kubectl:/.kube/
     environment:
       CERT_DIR_CONTAINER: "/certdir/"
-      DB_IP: "10.33.0.3"
+      DB_IP: "db"
       DB_DBNAME: "ahaz"
       DB_USERNAME: "dbeaver"
       DB_PASSWORD: "dbeaver"
-      REDIS_URL: "redis://10.33.0.4:6379"
+      REDIS_URL: "redis://redis:6379"
       PUBLIC_DOMAINNAME: "ahaz.lan"
       K8S_IP_RANGE: "10.42.0.0 255.255.255.0"
       K8S_IMAGEPULLSECRET_NAME: "regcred"
@@ -30,30 +30,9 @@ services:
       OVPN_IMAGE: "lisenet/openvpn"
       OVPN_TAG: "2.6.14"
     networks:
-      ahaz_db_connection:
-        ipv4_address: 10.33.0.2
-      #db_connection:
-      #  ipv4_address: 10.13.0.5
+      internal:
       default:
-  #k8s_controller_page:
-  #  depends_on:
-  #    k8s_controller:
-  #      condition: service_started
-  #  build: "./controller_page"
-  #  image: Martina-CTF/ahaz_k8s_controller_page:latest
-  #  environment:
-  #    DB_IP: "10.13.0.3"
-  #    DB_DBNAME: "ahaz"
-  #    DB_USERNAME: "dbeaver"
-  #    DB_PASSWORD: "dbeaver"
-  #    PUBLIC_DOMAINNAME: "test.lan"
-  #  networks:
-  #    db_connection:
-  #      ipv4_address: 10.13.0.4
-  #    default:
-  #  ports:
-  #    - "5001:5000"
-  k8s_controller_db:
+  db:
     image: mysql:9.5
     volumes:
       - ./ahaz_data/mysqldb/mysqldb_volume:/var/lib/mysql
@@ -64,28 +43,18 @@ services:
       MYSQL_USER: "dbeaver"
       MYSQL_PASSWORD: "dbeaver"
     networks:
-      ahaz_db_connection:
-        ipv4_address: 10.33.0.3
-      default:
+      internal:
     ports:
       - "3306:3306"
-  k8s_controller_redis:
+  redis:
     image: redis:4
     restart: always
     volumes:
       - ./ahaz_data/redis:/data
     networks:
-      ahaz_db_connection:
-        ipv4_address: 10.33.0.4
+      internal:
 networks:
-  ahaz_db_connection:
+  internal:
     driver: bridge
-    #external: true
     internal: true
-    ipam:
-      config:
-        - subnet: "10.33.0.0/29"
-  # db_connection:
-  #   name: db_connection
-  #   external: true
   default:
