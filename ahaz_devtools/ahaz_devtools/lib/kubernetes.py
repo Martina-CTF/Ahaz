@@ -1,3 +1,4 @@
+import functools
 import logging
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from .subprocess import execute_into_logger
 logger = logging.getLogger(__name__)
 
 
+@functools.cache  # ensure we load the config only once
 def load_kube_config():
     try:
         config.load_kube_config()
