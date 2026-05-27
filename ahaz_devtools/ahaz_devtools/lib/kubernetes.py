@@ -45,6 +45,7 @@ def track_daemonset_rollout(namespace: str, name: str):
         task = progress.add_task(f"Waiting for DaemonSet {name} to be ready...", total=None)
 
         while True:
+            sleep(0.5)  # Give each loop small pause, so we don't spam the API too much
             ds = k8s.read_namespaced_daemon_set(name, namespace)
 
             if not isinstance(ds, client.V1DaemonSet) or ds.status is None:
@@ -65,8 +66,6 @@ def track_daemonset_rollout(namespace: str, name: str):
                     f"{ds.status.number_ready or 0}/{ds.status.desired_number_scheduled}"
                 ),
             )
-
-            sleep(0.5)  # Wait for a bit before asking again
         progress.update(task, description=f"DaemonSet {name} is ready!")
 
 
@@ -78,6 +77,7 @@ def track_deployment_rollout(namespace: str, name: str, target_gen: int | None =
         task = progress.add_task(f"Waiting for Deployment {name} to be ready...", total=None)
 
         while True:
+            sleep(0.5)  # Give each loop small pause, so we don't spam the API too much
             deploy: client.V1Deployment = k8s.read_namespaced_deployment_status(name, namespace)  # pyright: ignore[reportAssignmentType]
 
             if not isinstance(deploy.status, client.V1DeploymentStatus):
@@ -103,8 +103,6 @@ def track_deployment_rollout(namespace: str, name: str, target_gen: int | None =
                     f"Deployment {name} ready: {deploy.status.ready_replicas or 0}/{deploy.status.replicas}"
                 ),
             )
-
-            sleep(0.5)  # Wait for a bit before asking again
         progress.update(task, description=f"Deployment {name} is ready!")
 
 
