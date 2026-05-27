@@ -145,10 +145,10 @@ def check_for_cluster():
     try:
         logger.info("Checking for existing Kubernetes cluster...")
         result = subprocess.run(
-            ["kind", "get", "clusters"],
+            ["kind", "get", "clusters", "--quiet"],
             check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
         )
 
