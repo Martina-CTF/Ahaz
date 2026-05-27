@@ -9,9 +9,6 @@ dependencies = [
     "watchdog>=6.0.0",
 ]
 
-[tool.uv.sources]
-ahaz_common = { workspace = true }
-
 [project.scripts]
 create-cluster = "ahaz_devtools.main:init_cluster"
 delete-cluster = "ahaz_devtools.main:delete_cluster"
