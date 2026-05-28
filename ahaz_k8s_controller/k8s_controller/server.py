@@ -6,8 +6,9 @@ from os import getenv
 from threading import Thread
 from time import sleep
 
-import certmanager
+# TODO: Improve local imports; I think import in folders are fugly
 import controller
+import crypto.manager
 import dboperator
 import uvicorn
 from events import RedisEventManager
@@ -147,7 +148,7 @@ async def getuser():
 def gen_team_from_flask_for_subprocess(request_data: RegisterTeamRequest) -> str:
     try:
         logger.debug("doing except")
-        certmanager.gen_team(
+        crypto.manager.gen_team(
             request_data.team_id,
             request_data.domain_name,
             request_data.port,
@@ -218,7 +219,7 @@ async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:  #
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 1)
             logger.debug("started registration proces for a team")
 
-            certmanager.gen_team(request_data.team_id, PUBLIC_DOMAINNAME, port, "tcp", CERT_DIR_CONTAINER)
+            crypto.manager.gen_team(request_data.team_id, PUBLIC_DOMAINNAME, port, "tcp", CERT_DIR_CONTAINER)
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 2)
             logger.debug(f"generated certificates for team {request_data.team_id}")
 
@@ -330,7 +331,7 @@ def del_team_subprocess(request_data: UserRequest | TeamRequest, reregister=Fals
     logger.debug(
         str(request_data.team_id) + " namespace deleted, about to delete team VPN directory for team"
     )
-    certmanager.del_team(request_data.team_id, CERT_DIR_CONTAINER)
+    crypto.manager.del_team(request_data.team_id, CERT_DIR_CONTAINER)
     logger.debug(
         str(request_data.team_id) + " cert Directory deleted, about to remove entries of team from db"
     )

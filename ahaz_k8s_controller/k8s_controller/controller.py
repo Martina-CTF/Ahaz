@@ -3,10 +3,12 @@ import logging
 import os
 import time
 import traceback
+from pathlib import Path
 
-import certmanager
+import crypto.manager
 import dboperator
 import events
+from cryptography.hazmat.primitives import serialization
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -693,14 +695,17 @@ def create_team_vpn_configmap(teamname) -> None:
         core_api = CoreV1Api()
         teamCertDir = CERT_DIR_CONTAINER + teamname
 
-        ovpn_config = certmanager.get_server_ovpn_config(teamCertDir)
-        server_key = certmanager.get_server_key(teamCertDir)
-        server_cert = certmanager.get_server_cert(teamCertDir)
-        server_ca = certmanager.get_server_ca(teamCertDir)
-        server_ta = certmanager.get_server_ta(teamCertDir)
-        ovpn_env = certmanager.get_openvpn_env(teamCertDir)
-        up_script = certmanager.get_up_script(teamCertDir)
-        down_script = certmanager.get_down_script(teamCertDir)
+        ovpn_config = crypto.manager.get_server_ovpn_config(teamCertDir)
+        server_key = crypto.manager.get_server_key(teamCertDir)
+        server_cert = crypto.manager.get_server_cert(teamCertDir)
+        server_ca = crypto.manager.get_server_ca(teamCertDir)
+        server_ta = crypto.manager.get_server_ta(teamCertDir)
+        ovpn_env = crypto.manager.get_openvpn_env(teamCertDir)
+
+        # TODO: Figure a better way to read in the up and down scripts for use in ConfigMap
+        basedir = Path(__file__).parent
+        up_script = (basedir / "assets" / "up.sh").read_text()
+        down_script = (basedir / "assets" / "down.sh").read_text()
 
         config_map = V1ConfigMap(
             api_version="v1",
@@ -708,9 +713,13 @@ def create_team_vpn_configmap(teamname) -> None:
             metadata=V1ObjectMeta(name=f"vpn-config-{teamname}"),
             data={
                 "ovpn.conf": ovpn_config,
-                "server.key": server_key,
-                "server.crt": server_cert,
-                "ca.crt": server_ca,
+                "server.key": server_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption(),
+                ).decode(),
+                "server.crt": server_cert.public_bytes(encoding=serialization.Encoding.PEM).decode(),
+                "ca.crt": server_ca.public_bytes(encoding=serialization.Encoding.PEM).decode(),
                 "ta.key": server_ta,
                 "ovpn.env": ovpn_env,
                 "up.sh": up_script,
@@ -858,15 +867,15 @@ def expose_team_vpn_container(teamname: str, externalport: int) -> None:
 
 
 def register_user_ovpn(teamname: str, username: str) -> str:
-    vpnDirLocation = CERT_DIR_CONTAINER + teamname
-    result = certmanager.generate_user(teamname, username, vpnDirLocation)
+    cert_dir = CERT_DIR_CONTAINER + teamname
+    result = crypto.manager.generate_user(teamname, username, cert_dir)
     dboperator.insert_user_vpn_config(teamname, username, result)
     return "successfully registered"
 
 
 def obtain_user_ovpn_config(teamname: str, username: str) -> str:
     vpnDirLocation = CERT_DIR_CONTAINER + teamname
-    result = certmanager.get_user(teamname, username, vpnDirLocation)
+    result = crypto.manager.get_user(teamname, username, vpnDirLocation)
     result = str(result).replace("\\n", "\n")
     return result
 

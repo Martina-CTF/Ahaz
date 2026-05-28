@@ -1,0 +1,31 @@
+client
+nobind
+dev tun
+remote-cert-tls server
+remote {{cn}} {{port}}
+{% for proto in protocols %}
+proto {{proto}}
+{% endfor %}
+
+{% for additional_options in additional_options %}
+{{additional_options}}
+{% endfor %}
+
+<key>
+{{key}}
+</key>
+
+<cert>
+{{cert}}
+</cert>
+
+<ca>
+{{ca}}
+</ca>
+
+key-direction 1
+
+<tls-auth>
+{{ta}}
+</tls-auth>
+
