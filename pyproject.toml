@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 dependencies = []
 
 [tool.uv.workspace]
-members = ["ahaz_k8s_controller", "ahaz_common", "ahaz_cli"]
+members = ["ahaz_k8s_controller", "ahaz_common", "ahaz_cli", "ahaz_devtools"]
 
 [tool.ruff]
 line-length = 110

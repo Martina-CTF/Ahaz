@@ -1,0 +1,23 @@
+[project]
+name = "ahaz_devtools"
+version = "0.0.1"
+description = "Command-line development tools for Ahaz"
+dependencies = [
+    "docker>=7.1.0",
+    "kubernetes>=34.1.0",
+    "rich>=14.2.0",
+    "watchdog>=6.0.0",
+]
+
+[project.scripts]
+create-cluster = "ahaz_devtools.main:init_cluster"
+delete-cluster = "ahaz_devtools.main:delete_cluster"
+watch = "ahaz_devtools.main:watch"
+build = "ahaz_devtools.main:build"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]

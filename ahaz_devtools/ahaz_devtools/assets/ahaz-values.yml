@@ -1,0 +1,7 @@
+controller:
+  image:
+    repository: "ahaz-local-registry:5000/ahaz"
+    pullPolicy: Always
+
+  publicDomainName: "ahaz.dev.internal"
+  k8sIpRange: "10.244.0.0/16"
