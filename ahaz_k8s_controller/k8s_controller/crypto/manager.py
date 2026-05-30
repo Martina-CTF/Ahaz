@@ -4,7 +4,7 @@ import subprocess
 from shutil import rmtree
 
 import dboperator
-from crypto.utils import (
+from crypto.certificates import (
     create_CA_certificate,
     create_signed_certificate,
     generate_key,
