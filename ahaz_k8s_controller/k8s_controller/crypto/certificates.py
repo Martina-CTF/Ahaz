@@ -6,7 +6,7 @@ import os
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
+from cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519, rsa
 from cryptography.hazmat.primitives.asymmetric.types import CertificateIssuerPrivateKeyTypes
 from cryptography.x509.oid import NameOID
 
@@ -44,7 +44,12 @@ def create_CA_certificate(key: CertificateIssuerPrivateKeyTypes, cn: str) -> x50
         .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
         .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650))
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .sign(key, hashes.SHA384() if isinstance(key, (rsa.RSAPrivateKey)) else None)
+        .sign(
+            key,
+            # TODO: Make hashing algorithm configurable; in case we are paranoid and SHA-384 is not enough
+            # SHA-384 is widely used in TLS certs, so it's a sensible default
+            None if isinstance(key, (ed25519.Ed25519PrivateKey, ed448.Ed448PrivateKey)) else hashes.SHA384(),
+        )
     )
 
 
