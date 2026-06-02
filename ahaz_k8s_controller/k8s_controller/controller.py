@@ -132,70 +132,51 @@ retry_opts = {
 }
 
 
-@retry(**retry_opts)
 def create_network_policy_deny_all(namespace: str) -> V1NetworkPolicy:
-    ensure_kube_config_loaded()
-
-    try:
-        policy = V1NetworkPolicy(
-            api_version="networking.k8s.io/v1",
-            kind="NetworkPolicy",
-            metadata=V1ObjectMeta(name="deny-all"),
-            spec=V1NetworkPolicySpec(
-                pod_selector=V1LabelSelector(match_labels={}),
-                policy_types=["Ingress", "Egress"],
-                ingress=[],
-                egress=[],
-            ),
-        )
-        return policy
-    except ApiException as e:
-        if e.status != 403:
-            logger.error(f"API Exception when creating deny-all network policy: {e}")
-        raise e
+    policy = V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=V1ObjectMeta(name="deny-all"),
+        spec=V1NetworkPolicySpec(
+            pod_selector=V1LabelSelector(match_labels={}),
+            policy_types=["Ingress", "Egress"],
+            ingress=[],
+            egress=[],
+        ),
+    )
+    return policy
 
 
-@retry(**retry_opts)
 def create_network_policy(namespace: str) -> V1NetworkPolicy:
     ensure_kube_config_loaded()
 
-    try:
-        policy = V1NetworkPolicy(
-            api_version="networking.k8s.io/v1",
-            kind="NetworkPolicy",
-            metadata=V1ObjectMeta(name="restrict-vpn-access"),
-            spec=V1NetworkPolicySpec(
-                pod_selector=V1LabelSelector(match_labels={"name": "vpn-container-pod"}),
-                policy_types=["Ingress", "Egress"],
-                ingress=[
-                    V1NetworkPolicyIngressRule(
-                        ports=[
-                            V1NetworkPolicyPort(protocol="TCP", port=1194),
-                            V1NetworkPolicyPort(protocol="UDP", port=1194),
-                        ]
-                    )
-                ],
-                egress=[
-                    # Explicitly deny all egress traffic by default
-                    # Allow communication only within the same namespace
-                    V1NetworkPolicyEgressRule(
-                        to=[
-                            V1NetworkPolicyPeer(
-                                pod_selector=V1LabelSelector(match_labels={"team": namespace})
-                            )
-                        ]
-                    )
-                ],
-            ),
-        )
-        return policy
-    except ApiException as e:
-        if e.status != 403:
-            logger.error(f"API Exception when creating restrict-vpn-access network policy: {e}")
-        raise e
+    policy = V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=V1ObjectMeta(name="restrict-vpn-access"),
+        spec=V1NetworkPolicySpec(
+            pod_selector=V1LabelSelector(match_labels={"name": "vpn-container-pod"}),
+            policy_types=["Ingress", "Egress"],
+            ingress=[
+                V1NetworkPolicyIngressRule(
+                    ports=[
+                        V1NetworkPolicyPort(protocol="TCP", port=1194),
+                        V1NetworkPolicyPort(protocol="UDP", port=1194),
+                    ]
+                )
+            ],
+            egress=[
+                # Explicitly deny all egress traffic by default
+                # Allow communication only within the same namespace
+                V1NetworkPolicyEgressRule(
+                    to=[V1NetworkPolicyPeer(pod_selector=V1LabelSelector(match_labels={"team": namespace}))]
+                )
+            ],
+        ),
+    )
+    return policy
 
 
-# TODO: fix unused params
 @retry(**retry_opts)
 def start_challenge_pod(
     team: str,
@@ -277,13 +258,18 @@ def start_challenge_pod(
 
 
 @retry(**retry_opts)
-def start_challenge(team: str, namespace: str, task: Task) -> int:
+def start_challenge(team: str, namespace: str, task: Task) -> None:
+    ensure_kube_config_loaded()
     try:
         logger.info(f"Starting challenge {task.name} for team {team}")
         for pod in task.pods:
             start_challenge_pod(team, namespace, task.name, pod)
-        create_challenge_network_policies(team, task)
-        return 0
+
+        net_api = NetworkingV1Api()
+        policies = create_challenge_network_policies(team, task)
+        for policy in policies:
+            net_api.create_namespaced_network_policy(namespace=team, body=policy)
+
     except ApiException as e:
         if e.status != 403:
             logger.error(f"API Exception when starting challenge: {e}")
@@ -296,7 +282,7 @@ def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[dict[s
 
     pod_info = []
     for pod in pod_list.items:
-        pod = pod  # type: V1Pod
+        pod: V1Pod = pod
 
         # Test whether we have all the values we expect
         if not pod.metadata:
@@ -399,115 +385,91 @@ def create_pod_service(team: str, task: str, name: str) -> None:
         raise e
 
 
-@retry(**retry_opts)
 def create_network_policy_deny_all_task(task_id: str) -> V1NetworkPolicy:
-    ensure_kube_config_loaded()
-    try:
-        policy = V1NetworkPolicy(
-            api_version="networking.k8s.io/v1",
-            kind="NetworkPolicy",
-            metadata=V1ObjectMeta(name="deny-all-" + task_id, labels={"task": task_id}),
-            spec=V1NetworkPolicySpec(
-                pod_selector=V1LabelSelector(match_labels={"task": task_id}),
-                policy_types=["Ingress", "Egress"],
-                ingress=[],
-                egress=[],
-            ),
-        )
-        return policy
-    except ApiException as e:
-        if e.status != 403:
-            logger.error(f"API Exception when creating deny-all network policy for {task_id}: {e}")
-        raise e
+    policy = V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=V1ObjectMeta(name="deny-all-" + task_id, labels={"task": task_id}),
+        spec=V1NetworkPolicySpec(
+            pod_selector=V1LabelSelector(match_labels={"task": task_id}),
+            policy_types=["Ingress", "Egress"],
+            ingress=[],
+            egress=[],
+        ),
+    )
+    return policy
 
 
-@retry(**retry_opts)
 def create_network_policy_allow_task(task_id: str, network_pods: list[str], netname: str) -> V1NetworkPolicy:
-    ensure_kube_config_loaded()
-    try:
-        # Explicitly allow DNS
-        dns_peer = V1NetworkPolicyPeer(
-            namespace_selector=V1LabelSelector(match_labels={"kubernetes.io/metadata.name": "kube-system"}),
-            pod_selector=V1LabelSelector(match_labels={"k8s-app": "kube-dns"}),
-        )
-        dns_egress_rule = V1NetworkPolicyEgressRule(
-            to=[dns_peer],
-            ports=[
-                V1NetworkPolicyPort(protocol="UDP", port=53),
-                V1NetworkPolicyPort(protocol="TCP", port=53),
-            ],
-        )
-        # Explicitly allow the pods within the network
-        pod_selector = V1LabelSelector(
+    # Explicitly allow DNS
+    dns_peer = V1NetworkPolicyPeer(
+        namespace_selector=V1LabelSelector(match_labels={"kubernetes.io/metadata.name": "kube-system"}),
+        pod_selector=V1LabelSelector(match_labels={"k8s-app": "kube-dns"}),
+    )
+    dns_egress_rule = V1NetworkPolicyEgressRule(
+        to=[dns_peer],
+        ports=[
+            V1NetworkPolicyPort(protocol="UDP", port=53),
+            V1NetworkPolicyPort(protocol="TCP", port=53),
+        ],
+    )
+    # Explicitly allow the pods within the network
+    pod_selector = V1LabelSelector(
+        match_expressions=[V1LabelSelectorRequirement(key="name", operator="In", values=network_pods)]
+    )
+
+    peer_selector = V1NetworkPolicyPeer(
+        pod_selector=V1LabelSelector(
             match_expressions=[V1LabelSelectorRequirement(key="name", operator="In", values=network_pods)]
         )
+    )
 
-        peer_selector = V1NetworkPolicyPeer(
-            pod_selector=V1LabelSelector(
-                match_expressions=[V1LabelSelectorRequirement(key="name", operator="In", values=network_pods)]
+    ingress_rule = V1NetworkPolicyIngressRule(_from=[peer_selector])
+    egress_rule = V1NetworkPolicyEgressRule(to=[peer_selector])
+
+    pod_selector = V1LabelSelector(
+        match_expressions=[
+            V1LabelSelectorRequirement(
+                key="name",
+                operator="In",
+                values=network_pods,  # your array of pod names
             )
-        )
+        ]
+    )
 
-        ingress_rule = V1NetworkPolicyIngressRule(_from=[peer_selector])
-        egress_rule = V1NetworkPolicyEgressRule(to=[peer_selector])
-
-        pod_selector = V1LabelSelector(
-            match_expressions=[
-                V1LabelSelectorRequirement(
-                    key="name",
-                    operator="In",
-                    values=network_pods,  # your array of pod names
-                )
-            ]
-        )
-
-        policy = V1NetworkPolicy(
-            api_version="networking.k8s.io/v1",
-            kind="NetworkPolicy",
-            metadata=V1ObjectMeta(name="allow-all-" + netname, labels={"task": task_id}),
-            spec=V1NetworkPolicySpec(
-                pod_selector=pod_selector,
-                policy_types=["Ingress", "Egress"],
-                ingress=[ingress_rule],
-                egress=[dns_egress_rule, egress_rule],
-            ),
-        )
-        return policy
-    except ApiException as e:
-        if e.status != 403:
-            logger.error(f"API Exception when creating allow-all network policy for network {netname}: {e}")
-        raise e
+    policy = V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=V1ObjectMeta(name="allow-all-" + netname, labels={"task": task_id}),
+        spec=V1NetworkPolicySpec(
+            pod_selector=pod_selector,
+            policy_types=["Ingress", "Egress"],
+            ingress=[ingress_rule],
+            egress=[dns_egress_rule, egress_rule],
+        ),
+    )
+    return policy
 
 
-# FIXME: should probably return list[V1NetworkPolicy] to match other creation funcs
+def create_challenge_network_policies(team: str, task: Task) -> list[V1NetworkPolicy]:
+    policies = []
+    policies.append(create_network_policy_deny_all_task(task.name))
+
+    for network in task.networks:
+        applicable_pods = [pod.name for pod in task.pods if network.name in pod.network]
+        if network.access == ["player"]:
+            applicable_pods.append("vpn-container-pod")
+
+        allow_policy = create_network_policy_allow_task(task.name, applicable_pods, network.name)
+        policies.append(allow_policy)
+
+    return policies
+
+
 @retry(**retry_opts)
-def create_challenge_network_policies(team: str, task: Task) -> None:
+def stop_challenge(namespace: str, task: str) -> None:
     ensure_kube_config_loaded()
     try:
-        net_api = NetworkingV1Api()
-        deny_policy = create_network_policy_deny_all_task(task.name)
-        net_api.create_namespaced_network_policy(namespace=team, body=deny_policy)
-
-        for network in task.networks:
-            applicable_pods = [pod.name for pod in task.pods if network.name in pod.network]
-            if network.access == ["player"]:
-                applicable_pods.append("vpn-container-pod")
-
-            allow_policy = create_network_policy_allow_task(task.name, applicable_pods, network.name)
-            net_api.create_namespaced_network_policy(namespace=team, body=allow_policy)
-    except ApiException as e:
-        if e.status != 403:
-            logger.error(f"API Exception when creating challenge network policies for {task.name}: {e}")
-        raise e
-
-
-# FIXME: should probably not return a string
-@retry(**retry_opts)
-def stop_challenge(namespace: str, task: str) -> str:
-    ensure_kube_config_loaded()
-    try:
-        task = task.replace(" ", "-")
-
         core_api = CoreV1Api()
         net_api = NetworkingV1Api()
 
@@ -540,7 +502,6 @@ def stop_challenge(namespace: str, task: str) -> str:
             net_api.delete_namespaced_network_policy(name=policy.metadata.name, namespace=namespace)
 
         logger.info(f"All resources with label task={task} deleted from namespace {namespace}")
-        return f"All resources with label task={task} deleted from namespace {namespace}"
     except ApiException as e:
         if e.status != 403:
             logger.error(f"API Exception when stopping challenge {task} in namespace {namespace}: {e}")
