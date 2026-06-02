@@ -6,7 +6,6 @@ import traceback
 
 import certmanager
 import dboperator
-import events
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -921,59 +920,59 @@ def delete_namespace(teamname: str, timeout: int = 300, interval: int = 5) -> in
         raise e
 
 
-async def k8s_watcher(event_manager: events.RedisEventManager) -> None:
-    ensure_kube_config_loaded()
-    core_api = CoreV1Api()
-    w = watch.Watch()
-    logger.info("Starting Kubernetes watcher...")
-    for event_untyped in w.stream(core_api.list_pod_for_all_namespaces):
-        try:
-            event: V1PodList = event_untyped  # type: ignore
+# async def k8s_watcher(event_manager: events.RedisEventManager) -> None:
+#     ensure_kube_config_loaded()
+#     core_api = CoreV1Api()
+#     w = watch.Watch()
+#     logger.info("Starting Kubernetes watcher...")
+#     for event_untyped in w.stream(core_api.list_pod_for_all_namespaces):
+#         try:
+#             event: V1PodList = event_untyped  # type: ignore
 
-            # Publish pod name, labels, status, ip to the event manager
-            pod: V1Pod = event["object"]  # type: ignore
-            event_type: str = event["type"]  # type: ignore
-            pod_name: str = pod.metadata.name if pod.metadata and pod.metadata.name else "unknown"
-            pod_namespace: str = (
-                pod.metadata.namespace if pod.metadata and pod.metadata.namespace else "unknown"
-            )
-            pod_labels: dict[str, str] = pod.metadata.labels if pod.metadata and pod.metadata.labels else {}
-            pod_status: str = pod.status.phase if pod.status and pod.status.phase else "unknown"
-            pod_ip: str = pod.status.pod_ip if pod.status and pod.status.pod_ip else "unknown"
+#             # Publish pod name, labels, status, ip to the event manager
+#             pod: V1Pod = event["object"]  # type: ignore
+#             event_type: str = event["type"]  # type: ignore
+#             pod_name: str = pod.metadata.name if pod.metadata and pod.metadata.name else "unknown"
+#             pod_namespace: str = (
+#                 pod.metadata.namespace if pod.metadata and pod.metadata.namespace else "unknown"
+#             )
+#             pod_labels: dict[str, str] = pod.metadata.labels if pod.metadata and pod.metadata.labels else {}
+#             pod_status: str = pod.status.phase if pod.status and pod.status.phase else "unknown"
+#             pod_ip: str = pod.status.pod_ip if pod.status and pod.status.pod_ip else "unknown"
 
-            challenge_name: str | None = None
+#             challenge_name: str | None = None
 
-            if "name" in pod_labels:
-                try:
-                    challenge_name = dboperator.get_challenge_from_k8s_name(pod_labels.get("name", ""))
-                except Exception:
-                    pass
+#             if "name" in pod_labels:
+#                 try:
+#                     challenge_name = dboperator.get_challenge_from_k8s_name(pod_labels.get("name", ""))
+#                 except Exception:
+#                     pass
 
-            if pod_status == "Failed":
-                # Hide failed status. It shows up for a split second when pod is deleted.
-                pod_status = "Terminating"
+#             if pod_status == "Failed":
+#                 # Hide failed status. It shows up for a split second when pod is deleted.
+#                 pod_status = "Terminating"
 
-            if (pod.metadata.deletion_timestamp if pod.metadata else None) is not None and pod_status in (
-                "Pending",
-                "Running",
-            ):
-                pod_status = "Terminating"
+#             if (pod.metadata.deletion_timestamp if pod.metadata else None) is not None and pod_status in (
+#                 "Pending",
+#                 "Running",
+#             ):
+#                 pod_status = "Terminating"
 
-            event_data = {
-                "event_type": event_type,
-                "pod_name": pod_name,
-                "pod_namespace": pod_namespace,
-                "pod_status": pod_status,
-                "pod_ip": pod_ip,
-                "visible": int(pod_labels.get("visible", "0")),
-                "challenge": challenge_name,
-            }
+#             event_data = {
+#                 "event_type": event_type,
+#                 "pod_name": pod_name,
+#                 "pod_namespace": pod_namespace,
+#                 "pod_status": pod_status,
+#                 "pod_ip": pod_ip,
+#                 "visible": int(pod_labels.get("visible", "0")),
+#                 "challenge": challenge_name,
+#             }
 
-            await event_manager.publish_event(
-                "ahaz_events", json.dumps({"type": "pod_event", "data": event_data})
-            )
-        except Exception as e:
-            logger.error("Error processing Kubernetes event:")
-            logger.error(e)
-            logger.error(traceback.format_exc())
-            continue
+#             await event_manager.publish_event(
+#                 "ahaz_events", json.dumps({"type": "pod_event", "data": event_data})
+#             )
+#         except Exception as e:
+#             logger.error("Error processing Kubernetes event:")
+#             logger.error(e)
+#             logger.error(traceback.format_exc())
+#             continue

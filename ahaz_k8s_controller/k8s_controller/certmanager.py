@@ -556,7 +556,7 @@ def get_client_ovpn_config(
 
 def get_team_vpn_pod_port(team_id: str) -> int:
     port_resp = dboperator.get_team_port(team_id)
-    if port_resp != "null":
+    if port_resp is not None:
         return int(port_resp)
     else:
         return TEAM_PORT_RANGE_START + int(team_id) - 1

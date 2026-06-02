@@ -14,8 +14,9 @@ ahaz_data/kubectl/*
 ahaz_data/certs/*
 !ahaz_data/certs/.gitkeep
 
-# MySQL database files
-ahaz_data/mysqldb/mysqldb_volume/*
+# PostgreSQL database files
+ahaz_data/postgres/data/*
+!ahaz_data/postgres/data/.gitkeep
 
 # Redis data files
 ahaz_data/redis/*

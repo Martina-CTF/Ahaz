@@ -6,7 +6,6 @@ description = "Kubernetes controller for Ahaz"
 dependencies = [
     "cryptography>=46.0.3",
     "kubernetes>=34.1.0",
-    "mysql-connector-python>=9.5.0",
     "pyyaml>=6.0.3",
     "requests>=2.32.5",
     "uvicorn>=0.38.0",
@@ -15,6 +14,7 @@ dependencies = [
     "redis>=7.0.1",
     "asyncio>=4.0.0",
     "quart>=0.20.0",
+    "psycopg[binary,pool]>=3.3.3",
 ]
 
 [tool.uv.sources]

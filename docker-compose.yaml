@@ -16,8 +16,8 @@ services:
       CERT_DIR_CONTAINER: "/certdir/"
       DB_IP: "db"
       DB_DBNAME: "ahaz"
-      DB_USERNAME: "dbeaver"
-      DB_PASSWORD: "dbeaver"
+      DB_USERNAME: "ahaz"
+      DB_PASSWORD: "ahaz"
       REDIS_URL: "redis://redis:6379"
       PUBLIC_DOMAINNAME: "ahaz.lan"
       K8S_IP_RANGE: "10.42.0.0 255.255.255.0"
@@ -33,17 +33,21 @@ services:
       internal:
       default:
   db:
-    image: mysql:9.5
-    volumes:
-      - ./ahaz_data/mysqldb/mysqldb_volume:/var/lib/mysql
-      - ./ahaz_data/mysqldb/init.sh:/docker-entrypoint-initdb.d/init.sh
+    image: postgres:18.3-alpine
+    restart: always
+    shm_size: 128mb
     environment:
-      MYSQL_ROOT_PASSWORD: "shooch4SXe2iech9Aiv1do0pISuh8xeaahDe3WoTvoowae4Xahl0eZ1NDutaegh2"
-      MYSQL_DATABASE: "ahaz"
-      MYSQL_USER: "dbeaver"
-      MYSQL_PASSWORD: "dbeaver"
+      POSTGRES_USER: "ahaz"
+      # Note: For more complex environments, read: https://github.com/docker-library/docs/blob/master/postgres/README.md#docker-secrets
+      POSTGRES_PASSWORD: "ahaz"
+      POSTGRES_DB: "ahaz"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    volumes:
+      - ./ahaz_data/postgres/data:/var/lib/postgresql/data
+      - ./ahaz_data/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       internal:
+    # TODO: healthcheck
   redis:
     image: redis:4
     restart: always
