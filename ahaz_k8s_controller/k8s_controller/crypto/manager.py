@@ -20,55 +20,6 @@ PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 TEAM_PORT_RANGE_START = int(os.getenv("TEAM_PORT_RANGE_START", "20000"))
 
 
-def init_pki(directory: str, cn: str) -> None:
-    # TODO: Move towards a database-driven approach where we store PKI data inside of a database instead of
-    # a filesystem.
-
-    logger.debug(f"Initializing PKI for {cn} in directory {directory}...")
-
-    # Create directory structure
-    os.makedirs(os.path.join(directory, "pki", "private"), exist_ok=True)
-    os.makedirs(os.path.join(directory, "pki", "issued"), exist_ok=True)
-
-    # Set perms on pki/private
-    os.chmod(os.path.join(directory, "pki", "private"), 0o700)
-
-    # Generate CA key and cert
-    ca_key = generate_key()
-    ca_cert = create_CA_certificate(ca_key, f"ca.{cn}")
-
-    # Write CA key and cert to disk
-    with open(os.path.join(directory, "pki", "private", "ca.key"), "wb") as f:
-        f.write(
-            ca_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
-
-    with open(os.path.join(directory, "pki", "ca.crt"), "wb") as f:
-        f.write(ca_cert.public_bytes(serialization.Encoding.PEM))
-
-    # Generate server cert
-    server_key = generate_key()
-    # TODO: Differentiate teams, perhaps?
-    server_cert = create_signed_certificate(server_key, ca_key, ca_cert, f"server.{cn}", server=True)
-
-    # Write server key and cert to disk
-    with open(os.path.join(directory, "pki", "private", "server.key"), "wb") as f:
-        f.write(
-            server_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
-
-    with open(os.path.join(directory, "pki", "issued", "server.crt"), "wb") as f:
-        f.write(server_cert.public_bytes(serialization.Encoding.PEM))
-
-
 # Config templates
 base_dir = os.path.dirname(os.path.abspath(__file__))
 j2env = Environment(loader=FileSystemLoader(os.path.join(base_dir, "templates")))
@@ -88,7 +39,6 @@ def gen_configs_ovpn(teamdirContainer: str, domainname: str, port: int, protocol
 def gen_ta_key(teamdirContainer: str) -> None:
     secret = os.urandom(256)  # 2048-bit random key
     with open(os.path.join(teamdirContainer, "pki", "ta.key"), "wb") as f:
-        f.write("#\n# OpenVPN Static key V1\n#\n".encode())
         f.write("-----BEGIN OpenVPN Static key V1-----\n".encode())
         f.write(secret.hex().encode())
         f.write("\n".encode())
