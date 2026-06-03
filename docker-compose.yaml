@@ -16,8 +16,8 @@ services:
       CERT_DIR_CONTAINER: "/certdir/"
       DB_IP: "db"
       DB_DBNAME: "ahaz"
-      DB_USERNAME: "dbeaver"
-      DB_PASSWORD: "dbeaver"
+      DB_USERNAME: "mongodb"
+      DB_PASSWORD: "I_LOVE_NOSQL!!!"
       REDIS_URL: "redis://redis:6379"
       PUBLIC_DOMAINNAME: "ahaz.lan"
       K8S_IP_RANGE: "10.42.0.0 255.255.255.0"
@@ -32,18 +32,32 @@ services:
     networks:
       internal:
       default:
-  db:
-    image: mysql:9.5
-    volumes:
-      - ./ahaz_data/mysqldb/mysqldb_volume:/var/lib/mysql
-      - ./ahaz_data/mysqldb/init.sh:/docker-entrypoint-initdb.d/init.sh
+  # db:
+  #   image: mysql:9.5
+  #   volumes:
+  #     - ./ahaz_data/mysqldb/mysqldb_volume:/var/lib/mysql
+  #     - ./ahaz_data/mysqldb/init.sh:/docker-entrypoint-initdb.d/init.sh
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: "shooch4SXe2iech9Aiv1do0pISuh8xeaahDe3WoTvoowae4Xahl0eZ1NDutaegh2"
+  #     MYSQL_DATABASE: "ahaz"
+  #     MYSQL_USER: "dbeaver"
+  #     MYSQL_PASSWORD: "dbeaver"
+  #   networks:
+  #     internal:
+  db: 
+    image: mongo:8.3.2
     environment:
-      MYSQL_ROOT_PASSWORD: "shooch4SXe2iech9Aiv1do0pISuh8xeaahDe3WoTvoowae4Xahl0eZ1NDutaegh2"
-      MYSQL_DATABASE: "ahaz"
-      MYSQL_USER: "dbeaver"
-      MYSQL_PASSWORD: "dbeaver"
+      MONGO_INITDB_ROOT_USERNAME: "mongodb"
+      MONGO_INITDB_ROOT_PASSWORD: "I_LOVE_NOSQL!!!"
+      MONGO_INITDB_DATABASE: "ahaz"
+      GLIBC_TUNABLES: "glibc.pthread.rseq=1" # fixes a bug in mongo where it hates newer kernels, see https://jira.mongodb.org/browse/SERVER-121912
+    volumes:
+      - ./ahaz_data/mongodb:/data/db
     networks:
       internal:
+    # FIXME: Disable me in prod!
+    ports:
+      - "27017:27017"
   redis:
     image: redis:4
     restart: always

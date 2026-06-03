@@ -17,6 +17,9 @@ ahaz_data/certs/*
 # MySQL database files
 ahaz_data/mysqldb/mysqldb_volume/*
 
+# MongoDB data files
+ahaz_data/mongodb/*
+
 # Redis data files
 ahaz_data/redis/*
 !ahaz_data/redis/.gitkeep

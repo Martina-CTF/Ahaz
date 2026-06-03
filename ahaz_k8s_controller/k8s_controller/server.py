@@ -8,8 +8,18 @@ from time import sleep
 
 import certmanager
 import controller
-import dboperator
 import uvicorn
+from db.operator import (
+    delete_team_and_vpn,
+    get_challenges_from_db,
+    get_registration_progress_team,
+    get_registration_progress_user,
+    get_user_vpn_config,
+    insert_team_into_db,
+    insert_user_vpn_config,
+    insert_vpn_port_into_db,
+    set_registration_progress_team,
+)
 from events import RedisEventManager
 from pydantic import ValidationError
 from quart import Quart, make_response, request
@@ -83,8 +93,8 @@ async def stop_challenge():
 
 
 @app.route("/get_challenges", methods=["GET"])
-def get_challenges():
-    challenges = dboperator.get_challenges_from_db()
+async def get_challenges():
+    challenges = await get_challenges_from_db()
     return json.dumps([{"challengename": challenge} for challenge in challenges])
 
 
@@ -102,16 +112,14 @@ async def get_pods_namespace():
     return podresult
 
 
-def register_user_threaded(request_data: UserRequest):
+async def register_user_threaded(request_data: UserRequest):
     logger.info(f"Registering user {request_data.user_id} to team {request_data.team_id}...")
     logger.debug("About to register user in docker")
-    controller.register_user_ovpn(teamname=request_data.team_id, username=request_data.user_id)
+    await controller.register_user_ovpn(teamname=request_data.team_id, username=request_data.user_id)
     logger.debug("About to obtain config")
     config = controller.obtain_user_ovpn_config(teamname=request_data.team_id, username=request_data.user_id)
     logger.debug("About to insert config into db")
-    dboperator.insert_user_vpn_config(
-        teamname=request_data.team_id, username=request_data.user_id, config=config
-    )
+    await insert_user_vpn_config(teamname=request_data.team_id, username=request_data.user_id, config=config)
     logger.debug("Successfully added a user to db")
     return "successfully added a user to db"
 
@@ -124,7 +132,7 @@ async def adduser():
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
 
-    userExists = dboperator.get_user_vpn_config(teamname=request_data.team_id, username=request_data.user_id)
+    userExists = await get_user_vpn_config(teamname=request_data.team_id, username=request_data.user_id)
 
     if userExists != "null":
         return "user already registered"
@@ -141,10 +149,15 @@ async def getuser():
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
 
-    return dboperator.get_user_vpn_config(teamname=request_data.team_id, username=request_data.user_id)
+    config = await get_user_vpn_config(teamname=request_data.team_id, username=request_data.user_id)
+
+    if config is None:
+        return "user not found", 404
+    else:
+        return config, 200, {"Content-Type": "text/plain"}
 
 
-def gen_team_from_flask_for_subprocess(request_data: RegisterTeamRequest) -> str:
+async def gen_team_from_flask_for_subprocess(request_data: RegisterTeamRequest) -> str:
     try:
         logger.debug("doing except")
         certmanager.gen_team(
@@ -160,8 +173,8 @@ def gen_team_from_flask_for_subprocess(request_data: RegisterTeamRequest) -> str
         logger.debug("about to expose team vpn container")
         controller.expose_team_vpn_container(request_data.team_id, request_data.port)
         logger.debug("=9")
-        dboperator.insert_team_into_db(request_data.team_id)
-        dboperator.insert_vpn_port_into_db(request_data.team_id, request_data.port)
+        await insert_team_into_db(request_data.team_id)
+        await insert_vpn_port_into_db(request_data.team_id, request_data.port)
         return "Successfully made a team"
     except Exception as e:
         logger.error(f"Error creating team: {e}")
@@ -187,7 +200,7 @@ async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:  #
 
     # HACK: Function in function is ugly, but need this working for 21.11.2025 :3
     async def set_registration_progress_threaded(team_id: str, user_id: str, progress: int) -> None:
-        dboperator.set_registration_progress_team(team_id, user_id, progress)
+        await set_registration_progress_team(team_id, user_id, progress)
 
         await redis_event_mgr.publish_event(
             "ahaz_events",
@@ -209,11 +222,11 @@ async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:  #
             logger.error(e)
             port = TEAM_PORT_RANGE_START
     try:
-        if dboperator.get_registration_progress_team(request_data.team_id) == 10:
+        if await get_registration_progress_team(request_data.team_id) == 10:
             return "team is being reregistered"
-        logger.debug(dboperator.get_registration_progress_team(request_data.team_id))
+        logger.debug(await get_registration_progress_team(request_data.team_id))
         if (
-            dboperator.get_registration_progress_team(request_data.team_id) == -999
+            await get_registration_progress_team(request_data.team_id) == -999
         ):  # if no team has been registered, register it
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 1)
             logger.debug("started registration proces for a team")
@@ -236,48 +249,46 @@ async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:  #
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 5)
             logger.debug("mystical 5th step performed")
 
-            dboperator.insert_team_into_db(request_data.team_id)
-            dboperator.insert_vpn_port_into_db(request_data.team_id, port)
+            await insert_team_into_db(request_data.team_id)
+            await insert_vpn_port_into_db(request_data.team_id, port)
             logger.debug(f"inserted data into db for team {request_data.team_id}")
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 6)
             logger.info(f"Successfully registered a team {request_data.team_id}")
         elif (
-            dboperator.get_registration_progress_team(request_data.team_id) < 6
+            await get_registration_progress_team(request_data.team_id) < 6
         ):  # status is less than 6, means that team is being registered, so wait while it is being done
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 0)
 
-            while dboperator.get_registration_progress_team(request_data.team_id) < 6:
+            while await get_registration_progress_team(request_data.team_id) < 6:
                 logger.info(f"waiting for team {request_data.team_id} user {request_data.user_id}")
                 sleep(5)
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 6)
         elif (
-            dboperator.get_registration_progress_team(request_data.team_id) >= 6
+            await get_registration_progress_team(request_data.team_id) >= 6
         ):  # if team is already registered, then
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 6)
 
-        teststatus = dboperator.get_registration_progress_user(request_data.team_id, request_data.user_id)
+        teststatus = await get_registration_progress_user(request_data.team_id, request_data.user_id)
         logger.debug(teststatus)
         # I am unsure if this is necessary? Seems to be a non-issue when I comment it out - Tower
         # sleep(2)  # in case the docker container for ovpn file creation is still running and doing something
 
-        if dboperator.get_registration_progress_team(request_data.team_id) == 10:
+        if await get_registration_progress_team(request_data.team_id) == 10:
             return "team is being reregistered"
-        if (
-            dboperator.get_registration_progress_user(request_data.team_id, request_data.user_id) == "null"
-        ) or (
-            dboperator.get_registration_progress_user(request_data.team_id, request_data.user_id) == 6
+        if (await get_registration_progress_user(request_data.team_id, request_data.user_id) == "null") or (
+            await get_registration_progress_user(request_data.team_id, request_data.user_id) == 6
         ):  # if user isn't registered or this was the user that first called the team registration
             logger.debug("about to register user ovpn config")
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 7)
-            controller.register_user_ovpn(request_data.team_id, request_data.user_id)
+            await controller.register_user_ovpn(request_data.team_id, request_data.user_id)
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 8)
             logger.debug("about to obtain config")
             config = controller.obtain_user_ovpn_config(request_data.team_id, request_data.user_id)
             logger.debug("about to insert config into db")
-            dboperator.insert_user_vpn_config(request_data.team_id, request_data.user_id, config)
+            await insert_user_vpn_config(request_data.team_id, request_data.user_id, config)
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 9)
             logger.debug("successfully added a user to db")
@@ -302,18 +313,18 @@ async def autogenerate():
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
 
-    status_user = dboperator.get_registration_progress_user(request_data.team_id, request_data.user_id)
+    status_user = await get_registration_progress_user(request_data.team_id, request_data.user_id)
 
-    if status_user == "null":
+    if status_user == -999:
         # if progress is null, only then start the thread
         Thread(target=asyncio.run, args=(autogenerate_subprocess(request_data),), daemon=True).start()
 
-    status_team = dboperator.get_registration_progress_team(request_data.team_id)
+    status_team = await get_registration_progress_team(request_data.team_id)
 
     if str(status_team) == "-999":
         status_team = "1"  # set to 1 because thread has possibly just started
 
-    if str(status_user) == "null":
+    if str(status_user) == "-999":
         status_user = "1"  # set to 1 because thread has possibly just started
 
     return json.dumps(
@@ -324,7 +335,7 @@ async def autogenerate():
     )
 
 
-def del_team_subprocess(request_data: UserRequest | TeamRequest, reregister=False) -> None:
+async def del_team_subprocess(request_data: UserRequest | TeamRequest, reregister=False) -> None:
     logger.debug(str(request_data.team_id) + " called del_team_subprocess, about to delete namespace")
     controller.delete_namespace(request_data.team_id)
     logger.debug(
@@ -334,7 +345,7 @@ def del_team_subprocess(request_data: UserRequest | TeamRequest, reregister=Fals
     logger.debug(
         str(request_data.team_id) + " cert Directory deleted, about to remove entries of team from db"
     )
-    dboperator.delete_team_and_vpn(request_data.team_id)
+    await delete_team_and_vpn(request_data.team_id)
     logger.debug(str(request_data.team_id) + " entries of team removed from db")
 
     if reregister:

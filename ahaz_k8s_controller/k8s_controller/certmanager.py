@@ -11,9 +11,9 @@ from os import getenv, listdir, makedirs, path
 from shutil import rmtree
 from typing import Any, Generator
 
-import dboperator
 import requests
 import yaml
+from db.operator import get_team_port
 
 logger = logging.getLogger()
 script_dir = path.dirname(path.realpath(__file__))
@@ -554,15 +554,15 @@ def get_client_ovpn_config(
     return "\n".join(config)
 
 
-def get_team_vpn_pod_port(team_id: str) -> int:
-    port_resp = dboperator.get_team_port(team_id)
-    if port_resp != "null":
+async def get_team_vpn_pod_port(team_id: str) -> int:
+    port_resp = await get_team_port(team_id)
+    if port_resp is not None:
         return int(port_resp)
     else:
         return TEAM_PORT_RANGE_START + int(team_id) - 1
 
 
-def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
+async def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
     easyrsa = obtain_easyrsa()
     if easyrsa is None:
         raise RuntimeError("EasyRSA installation not found")
@@ -581,17 +581,17 @@ def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
         user_id,
         path.join(teamVPNDirectory, "pki"),
         # HACK: make a better way of setting the port the client should connect to
-        ovpn_port=get_team_vpn_pod_port(team_id),
+        ovpn_port=await get_team_vpn_pod_port(team_id),
     )
 
 
-def get_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
+async def get_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
     return get_client_ovpn_config(
         PUBLIC_DOMAINNAME,
         user_id,
         path.join(teamVPNDirectory, "pki"),
         # HACK: make a better way of setting the port the client should connect to
-        ovpn_port=get_team_vpn_pod_port(team_id),
+        ovpn_port=await get_team_vpn_pod_port(team_id),
     )
 
 

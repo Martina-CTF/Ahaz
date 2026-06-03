@@ -5,8 +5,16 @@ import time
 import traceback
 
 import certmanager
-import dboperator
 import events
+from db.operator import (
+    get_challenge_from_k8s_name,
+    get_env_vars,
+    get_k8s_name_networks,
+    get_pods,
+    get_pods_in_network,
+    get_unique_networks,
+    insert_user_vpn_config,
+)
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -198,7 +206,7 @@ def create_network_policy(namespace: str) -> V1NetworkPolicy:
 
 # TODO: fix unused params
 @retry(**retry_opts)
-def start_challenge_pod(
+async def start_challenge_pod(
     teamname: str,
     k8s_name: str,
     image: str,
@@ -216,7 +224,7 @@ def start_challenge_pod(
         # FIXME: Gb and Gi are not strictly equivalent!
         storage = storage.replace("Gb", "Gi")
         ram = ram.replace("Gb", "Gi")
-        env_vars = dboperator.get_env_vars(k8s_name)
+        env_vars = await get_env_vars(k8s_name)
         pod_manifest = V1Pod(
             metadata=V1ObjectMeta(
                 name=k8s_name,
@@ -284,21 +292,21 @@ def start_challenge_pod(
 
 
 @retry(**retry_opts)
-def start_challenge(teamname: str, challengename: str) -> int:
+async def start_challenge(teamname: str, challengename: str) -> int:
     try:
         logger.info(f"Starting challenge {challengename} for team {teamname}")
-        db_pods_data = dboperator.get_pods(challengename)
+        db_pods_data = await get_pods(challengename)
         for i in db_pods_data:
             k8s_name, image, ram, cpu, visible_to_user = i[1:]
             storage = "2Gb"
-            netnames = dboperator.get_k8s_name_networks(k8s_name)
+            netnames = await get_k8s_name_networks(k8s_name)
             networklist = []
             for i in netnames:
                 networklist.append(i.replace("teamnet", teamname))
-            start_challenge_pod(
+            await start_challenge_pod(
                 teamname, k8s_name, image, ram, cpu, storage, visible_to_user, networklist, challengename
             )
-        create_challenge_network_policies(teamname, challengename)
+        await create_challenge_network_policies(teamname, challengename)
         return 0
     except ApiException as e:
         if e.status != 403:
@@ -306,7 +314,7 @@ def start_challenge(teamname: str, challengename: str) -> int:
         raise e
 
 
-def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[dict[str, str]]:
+async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[dict[str, str]]:
     if pod_list is None or not pod_list.items:
         return []
 
@@ -350,9 +358,7 @@ def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[dict[s
             "status": state,
             "ip": pod.status.pod_ip,
             "visibleIP": pod_visible,
-            "task": dboperator.get_challenge_from_k8s_name(pod.metadata.labels["name"])
-            if not is_vpn
-            else None,
+            "task": await get_challenge_from_k8s_name(pod.metadata.labels["name"]) if not is_vpn else None,
             "name": pod.metadata.labels["name"],
         }
 
@@ -504,16 +510,16 @@ def create_network_policy_allow_task(
 
 
 @retry(**retry_opts)
-def create_challenge_network_policies(teamname: str, challengename: str) -> None:
+async def create_challenge_network_policies(teamname: str, challengename: str) -> None:
     ensure_kube_config_loaded()
     try:
         net_api = NetworkingV1Api()
         deny_policy = create_network_policy_deny_all_task(teamname, challengename)
         net_api.create_namespaced_network_policy(namespace=teamname, body=deny_policy)
 
-        networklist = dboperator.get_unique_networks(challengename)
+        networklist = await get_unique_networks(challengename)
         for netname in networklist:  # understand all networks that will need to be created
-            temp_network_pods = dboperator.get_pods_in_network(challengename, netname)
+            temp_network_pods = await get_pods_in_network(challengename, netname)
             network_pods = [x for x in temp_network_pods]  # make a copy
 
             if netname == "teamnet":  # if it is teamnet, include the vpn pod in whitelist
@@ -857,10 +863,10 @@ def expose_team_vpn_container(teamname: str, externalport: int) -> None:
         raise e
 
 
-def register_user_ovpn(teamname: str, username: str) -> str:
+async def register_user_ovpn(teamname: str, username: str) -> str:
     vpnDirLocation = CERT_DIR_CONTAINER + teamname
-    result = certmanager.generate_user(teamname, username, vpnDirLocation)
-    dboperator.insert_user_vpn_config(teamname, username, result)
+    result = await certmanager.generate_user(teamname, username, vpnDirLocation)
+    await insert_user_vpn_config(teamname, username, result)
     return "successfully registered"
 
 
@@ -945,7 +951,7 @@ async def k8s_watcher(event_manager: events.RedisEventManager) -> None:
 
             if "name" in pod_labels:
                 try:
-                    challenge_name = dboperator.get_challenge_from_k8s_name(pod_labels.get("name", ""))
+                    challenge_name = await get_challenge_from_k8s_name(pod_labels.get("name", ""))
                 except Exception:
                     pass
 
