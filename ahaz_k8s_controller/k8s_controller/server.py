@@ -288,9 +288,9 @@ async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:  #
             await controller.register_user_ovpn(request_data.team_id, request_data.user_id)
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 8)
-            logger.debug("about to obtain config")
-            config = controller.obtain_user_ovpn_config(request_data.team_id, request_data.user_id)
-            logger.debug("about to insert config into db")
+            # logger.debug("about to obtain config")
+            # config = controller.obtain_user_ovpn_config(request_data.team_id, request_data.user_id)
+            # logger.debug("about to insert config into db")
             # await insert_user_vpn_config(request_data.team_id, request_data.user_id, config)
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 9)
