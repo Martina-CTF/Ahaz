@@ -47,7 +47,7 @@ def test(
     client = docker.from_env()
     for pod in task.pods:
         with Status(f"Checking image for pod '{pod.name}'...", spinner="dots") as status:
-            image_tag = f"{pod.image.image_name}:{task.version}"
+            image_tag = f"{pod.image.name}:{task.version}"
             if not build:
                 # See if we can find the image locally
                 try:
@@ -60,9 +60,14 @@ def test(
             # Build the image
             status.update(f"Building image '{image_tag}'...")
             log.info(f"Building image '{image_tag}' for pod '{pod.name}'...")
-            build_args = {arg.name: arg.value for arg in (pod.image.build_args or [])}
+            # TODO: Integrate build args into spec
+            # build_args = {arg.name: arg.value for arg in (pod.image.build_args or [])}
+            build_args = {}
+            assert pod.image.context is not None, (
+                "Image context must be specified for building"
+            )  # TODO: Make subset where this is always true
             try:
-                try_build_image(image_tag, pod.image.build_context, build_args, verbose)
+                try_build_image(image_tag, pod.image.context, build_args, verbose)
             except Exception as e:
                 log.error(f"Failed to build image '{image_tag}' for pod '{pod.name}': {e}")
                 return

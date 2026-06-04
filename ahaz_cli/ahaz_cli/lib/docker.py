@@ -4,10 +4,12 @@ import time
 from typing import Callable
 
 import docker
+import docker.models
+import docker.models.networks
 import rich
 import rich.ansi
 import rich.style
-from ahaz_common.task import Pod, Task
+from ahaz_common.task import PodInformation, Task
 from docker.errors import BuildError, NotFound
 from docker.models.containers import Container
 from rich.status import Status
@@ -84,33 +86,28 @@ def config_units_to_docker_units(config_value: str) -> str:
         raise ValueError(f"Unsupported resource unit in value: {config_value}")
 
 
-def create_env(task: Task) -> list[tuple[Pod, Container]]:
+def create_env(task: Task) -> list[tuple[PodInformation, Container]]:
     client = docker.from_env()
     try:
         with Status("Setting up task environment...", spinner="dots") as status:
             # Set up networks
-            network_guide = {}
+            network_map: dict[str, docker.models.networks.Network] = {}
             for net in task.networks:
                 log.info(f"Setting up network '{net.name}'...")
                 status.update(f"Setting up network '{net.name}'...")
                 network = client.networks.create(
                     name=f"{get_network_name(task.name, net.name)}", check_duplicate=True
                 )
-                for device in net.devices:
-                    network_guide.setdefault(device, []).append(network)
+
+                network_map[net.name] = network
 
             status.update("Setting up containers...")
             containers = []
             for pod in task.pods:
                 status.update(f"Creating container for pod '{pod.name}'...")
 
-                image_tag = f"{pod.image.image_name}:{task.version}"
-                env_vars = {env.name: env.value for env in task.env_vars or [] if env.pod_name == pod.name}
-                testing = getattr(pod, "testing", None)
-                exposed_ports = {
-                    port.split(":")[1]: int(port.split(":")[0])
-                    for port in (testing.exposed_ports if testing and testing.exposed_ports else [])
-                }
+                image_tag = f"{pod.image.name}:{task.version}"
+                env_vars = {env.name: env.value for env in pod.env}
 
                 container = client.containers.run(
                     image=image_tag,
@@ -119,18 +116,21 @@ def create_env(task: Task) -> list[tuple[Pod, Container]]:
                     tty=True,
                     stdin_open=True,
                     environment=env_vars,
-                    mem_limit=config_units_to_docker_units(pod.limits_ram),
-                    cpu_count=pod.limits_cpu,
-                    ports=exposed_ports,
+                    mem_limit=config_units_to_docker_units(pod.limits.ram),
+                    cpu_count=int(
+                        pod.limits.cpu
+                    ),  # TODO: Process this better to allow for fractional CPUs, e.g. 0.5
+                    # TODO: Readd this
+                    # ports=exposed_ports,
                     hostname=pod.name,
                     stream=True,
                 )
                 containers.append((pod, container))
 
                 # Connect to networks
-                for network in network_guide.get(pod.name, []):
-                    status.update(f"Connecting pod '{pod.name}' to network '{network.name}'...")
-                    network.connect(container)
+                for network in pod.networks:
+                    status.update(f"Connecting pod '{pod.name}' to network '{network}'...")
+                    network_map[network].connect(container)
 
             status.update("Task environment set up successfully.")
             log.info("Task environment set up successfully.")
@@ -167,7 +167,7 @@ def cleanup_env(task_name: str, pod_names: list[str], network_names: list[str]):
     log.info("Docker test environment cleaned up successfully!")
 
 
-def stream_logs(pod: Pod, container: Container, logger: _ContainerLoggerAdapter) -> None:
+def stream_logs(pod: PodInformation, container: Container, logger: _ContainerLoggerAdapter) -> None:
     while True:
         try:
             buffer = ""
@@ -189,7 +189,7 @@ def stream_logs(pod: Pod, container: Container, logger: _ContainerLoggerAdapter)
             log.debug(f"Log stream for pod '{pod.name}' ended: {e}")
 
 
-def log_docker_logs(containers: list[tuple[Pod, Container]], exit_callback: Callable) -> None:
+def log_docker_logs(containers: list[tuple[PodInformation, Container]], exit_callback: Callable) -> None:
     # Hang until the user interrupts
     log.info("Task environment is running. Press [bold]Ctrl+C[/bold] to stop.")
     print()
