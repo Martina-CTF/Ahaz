@@ -8,12 +8,13 @@ import re
 import subprocess
 import tarfile
 from os import getenv, listdir, makedirs, path
+from pathlib import Path
 from shutil import rmtree
 from typing import Any, Generator
 
 import requests
 import yaml
-from db.operator import get_team_port
+from db.operator import get_range
 
 logger = logging.getLogger()
 script_dir = path.dirname(path.realpath(__file__))
@@ -555,10 +556,11 @@ def get_client_ovpn_config(
 
 
 async def get_team_vpn_pod_port(team_id: str) -> int:
-    port_resp = await get_team_port(team_id)
-    if port_resp is not None:
-        return int(port_resp)
-    else:
+    try:
+        team_range = await get_range(team_id)
+        return team_range["port"]
+    except ValueError:
+        # TODO: Team ID might be non-numeric, need to assign port in a different way
         return TEAM_PORT_RANGE_START + int(team_id) - 1
 
 
@@ -583,6 +585,12 @@ async def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> st
         # HACK: make a better way of setting the port the client should connect to
         ovpn_port=await get_team_vpn_pod_port(team_id),
     )
+
+
+# TODO: Hack to avoid a big logic refactor
+async def user_exists(user_id: str, teamVPNDirectory: str) -> bool:
+    path = Path(teamVPNDirectory) / "pki" / "issued" / f"{user_id}.crt"
+    return path.is_file()
 
 
 async def get_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:

@@ -832,10 +832,10 @@ def expose_team_vpn_container(teamname: str, externalport: int) -> None:
         raise e
 
 
-async def register_user_ovpn(teamname: str, username: str) -> str:
-    vpnDirLocation = CERT_DIR_CONTAINER + teamname
-    result = await certmanager.generate_user(teamname, username, vpnDirLocation)
-    await insert_user_vpn_config(teamname, username, result)
+# TODO: I just completely sidestepped the fckn DB for configs, need to move it to cert-based logic lmao
+async def register_user_ovpn(team_name: str, user_name: str) -> str:
+    vpnDirLocation = CERT_DIR_CONTAINER + team_name
+    await certmanager.generate_user(team_name, user_name, vpnDirLocation)
     return "successfully registered"
 
 
@@ -918,9 +918,9 @@ async def k8s_watcher(event_manager: events.RedisEventManager) -> None:
 
             challenge_name: str | None = None
 
-            if "name" in pod_labels:
+            if "task" in pod_labels:
                 try:
-                    challenge_name = await get_challenge_from_k8s_name(pod_labels.get("name", ""))
+                    challenge_name = pod_labels["task"]
                 except Exception:
                     pass
 

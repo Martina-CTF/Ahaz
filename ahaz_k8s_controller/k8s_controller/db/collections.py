@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from os import getenv
 
-from db.models import Certificate, Range, TaskDefinition, TaskDeployment
+from db.models import Certificate, Range, RegisterProgress, TaskDefinition, TaskDeployment
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
@@ -22,6 +22,7 @@ class Collections:
     task_definitions: AsyncCollection[TaskDefinition]
     ranges: AsyncCollection[Range]
     task_deployments: AsyncCollection[TaskDeployment]
+    register_progress: AsyncCollection[RegisterProgress]
 
 
 @dataclass(slots=True)
@@ -54,6 +55,7 @@ async def get_context() -> MongoContext:
                 task_definitions=db["task_definitions"],
                 ranges=db["ranges"],
                 task_deployments=db["task_deployments"],
+                register_progress=db["register_progress"],
             ),
         )
 

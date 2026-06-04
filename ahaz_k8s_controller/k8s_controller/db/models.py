@@ -41,3 +41,10 @@ class TaskDeployment(TypedDict):
     team_id: str
     task_name: str
     expire_time: datetime.datetime
+
+
+# TODO: REMOVE ME!!!!! I SUCK!!!!!
+class RegisterProgress(TypedDict):
+    team_id: str
+    user_id: str
+    progress: int
