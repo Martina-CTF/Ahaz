@@ -6,18 +6,8 @@ import traceback
 
 import certmanager
 import events
-from ahaz_common.task import Pod
-from db.models import Pod as DBPod
-from db.operator import (
-    EnvVarOut,
-    get_challenge_from_k8s_name,
-    get_env_vars,
-    get_k8s_name_networks,
-    get_pods,
-    get_pods_in_network,
-    get_unique_networks,
-    insert_user_vpn_config,
-)
+from ahaz_common.task import AccessEnum, PodInformation
+from db.operator import get_task_definition
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -207,50 +197,36 @@ def create_network_policy(namespace: str) -> V1NetworkPolicy:
         raise e
 
 
-# TODO: fix unused params
+# TODO: figure out a better way to pass along task info (i.e. version)
 @retry(**retry_opts)
-async def start_challenge_pod(
-    teamname: str,
-    k8s_name: str,
-    image: str,
-    ram: str,
-    cpu: str,
-    storage: str,
-    visible_to_user: bool,
-    networklist: list[str],  # FIXME: Is this used?
-    taskname: str,
-) -> None:
+async def start_challenge_pod(team_name: str, pod: PodInformation, task_name: str, task_version: str) -> None:
     ensure_kube_config_loaded()
     try:
         core_api = CoreV1Api()
-        taskname = taskname.replace(" ", "-")
-        # FIXME: Gb and Gi are not strictly equivalent!
-        storage = storage.replace("Gb", "Gi")
-        ram = ram.replace("Gb", "Gi")
-        env_vars: list[EnvVarOut] = await get_env_vars(k8s_name)
+
         pod_manifest = V1Pod(
             metadata=V1ObjectMeta(
-                name=k8s_name,
+                name=pod.name,
                 labels={
-                    "team": teamname,
-                    "visible": str(
-                        visible_to_user
-                    ),  # used to identify if this pods IP address will be shown to user.
-                    "task": taskname,  # identifies task pod is part of, used for network policies
-                    "name": k8s_name,  # used for service selector
+                    "team": team_name,
+                    "visible": str(pod.visible),  # show this pod to user?
+                    "task": task_name,  # identifies task pod is part of, used for network policies
+                    "name": pod.name,  # used for service selector
+                    "version": task_version,  # used to identify the version of the pod
                 },
             ),
             spec=V1PodSpec(
                 containers=[
                     V1Container(
-                        image=image,
+                        image=f"{pod.image.name}:{task_version}",
                         name="container",
-                        env=[V1EnvVar(name=var.name, value=var.value) for var in env_vars],
+                        env=[V1EnvVar(name=var.name, value=var.value) for var in pod.env],
                         resources=V1ResourceRequirements(
                             limits={
-                                "memory": ram,
-                                "cpu": str(cpu),
-                                "ephemeral-storage": storage,
+                                # TODO: Implement util function to convert *ilo to *ibi
+                                "memory": pod.limits.ram.replace("Gb", "Gi"),
+                                "cpu": str(pod.limits.cpu),
+                                "ephemeral-storage": "128Mi",  # TODO: add storage limit to task spec
                             },
                             requests={
                                 "memory": "0",
@@ -284,10 +260,12 @@ async def start_challenge_pod(
                 image_pull_secrets=[{"name": K8S_IMAGEPULLSECRET_NAME}],
             ),
         )
-        logger.debug(f"Creating pod {k8s_name} in namespace {teamname} with image {image}")
+
+        logger.debug(f"Creating pod {pod.name} in namespace {team_name} with image {pod.image.name}")
         logger.debug(f"Pod manifest: {pod_manifest}")
-        core_api.create_namespaced_pod(namespace=teamname, body=pod_manifest)
-        create_pod_service(teamname, taskname, k8s_name)
+
+        core_api.create_namespaced_pod(namespace=team_name, body=pod_manifest)
+        create_pod_service(team_name, task_name, pod.name)
     except ApiException as e:
         if e.status != 403:
             logger.error(f"API Exception when starting challenge pod: {e}")
@@ -295,29 +273,22 @@ async def start_challenge_pod(
 
 
 @retry(**retry_opts)
-async def start_challenge(teamname: str, challengename: str) -> int:
+async def start_challenge(team_name: str, task_name: str) -> None:
     try:
-        logger.info(f"Starting challenge {challengename} for team {teamname}")
-        db_pods_data: list[DBPod] = await get_pods(challengename)
-        for pod in db_pods_data:
-            storage = "2Gb"
-            netnames = await get_k8s_name_networks(pod["k8s_name"])
-            networklist = []
-            for i in netnames:
-                networklist.append(i.replace("teamnet", teamname))
+        logger.info(f"Starting challenge {task_name} for team {team_name}")
+        task = (await get_task_definition(task_name))["definition"]
+
+        for pod in task.pods:
+            version = task.version if task.version else "latest"
+
             await start_challenge_pod(
-                teamname,
-                pod["k8s_name"],
-                pod["image"],
-                pod["ram"],
-                str(pod["cpu"]),
-                storage,
-                pod["visible"],
-                networklist,
-                challengename,
+                team_name,
+                pod,
+                task_name,
+                version,
             )
-        await create_challenge_network_policies(teamname, challengename)
-        return 0
+
+        await create_challenge_network_policies(team_name, task_name)
     except ApiException as e:
         if e.status != 403:
             logger.error(f"API Exception when starting challenge: {e}")
@@ -368,7 +339,7 @@ async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[
             "status": state,
             "ip": pod.status.pod_ip,
             "visibleIP": pod_visible,
-            "task": await get_challenge_from_k8s_name(pod.metadata.labels["name"]) if not is_vpn else None,
+            "task": pod.metadata.labels["task"] if not is_vpn else None,
             "name": pod.metadata.labels["name"],
         }
 
@@ -378,25 +349,26 @@ async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[
 
 
 @retry(**retry_opts)
-def get_pods_namespace(teamname: str, showInvisible: bool) -> str:
+def get_pods_namespace(team_name: str, show_invisible: bool) -> str:
     ensure_kube_config_loaded()
     try:
         core_api = CoreV1Api()
-        pod_list: V1PodList = core_api.list_namespaced_pod(teamname)
+        pod_list: V1PodList = core_api.list_namespaced_pod(team_name)
 
         if not pod_list.items:
             return json.dumps([])
-        pod_info = summarise_pods_list(pod_list, showInvisible)
+
+        pod_info = summarise_pods_list(pod_list, show_invisible)
 
         return json.dumps(pod_info)
     except ApiException as e:
         if e.status != 403:
-            logger.error(f"API Exception when getting pods in namespace {teamname}: {e}")
+            logger.error(f"API Exception when getting pods in namespace {team_name}: {e}")
         raise e
 
 
 @retry(**retry_opts)
-def create_pod_service(teamname: str, taskname: str, k8s_name: str) -> None:
+def create_pod_service(team_name: str, task_name: str, k8s_name: str) -> None:
     ensure_kube_config_loaded()
     try:
         core_api = CoreV1Api()
@@ -404,24 +376,17 @@ def create_pod_service(teamname: str, taskname: str, k8s_name: str) -> None:
         service = V1Service(
             metadata=V1ObjectMeta(
                 name=k8s_name,  # FIXME: (which one?) could also be f"{challengename}-service"
-                namespace=teamname,
-                labels={"task": taskname},
+                namespace=team_name,
+                labels={"task": task_name},
             ),
             spec=V1ServiceSpec(
                 cluster_ip="None",  # headless service
                 selector={"name": k8s_name},
-                # ports=[
-                #    V1ServicePort(
-                #        protocol="TCP",
-                #        port=0,
-                #        target_port=0
-                #    )
-                # ]
             ),
         )
 
         # Create the service in Kubernetes
-        api_response: V1Service = core_api.create_namespaced_service(namespace=teamname, body=service)  # type: ignore
+        api_response: V1Service = core_api.create_namespaced_service(namespace=team_name, body=service)  # type: ignore
         logger.debug(f"Service created. Status='{api_response.status}'")
     except ApiException as e:
         if e.status != 403:
@@ -431,35 +396,31 @@ def create_pod_service(teamname: str, taskname: str, k8s_name: str) -> None:
 
 # FIXME: Is teamname used?
 @retry(**retry_opts)
-def create_network_policy_deny_all_task(teamname: str, challengename: str) -> V1NetworkPolicy:
+def create_network_policy_deny_all_task(task_name: str) -> V1NetworkPolicy:
     ensure_kube_config_loaded()
     try:
-        sanitized_challengename = challengename.replace(" ", "-").lower()
-        taskname = challengename.replace(" ", "-")
-
         policy = V1NetworkPolicy(
             api_version="networking.k8s.io/v1",
             kind="NetworkPolicy",
-            metadata=V1ObjectMeta(
-                name="deny-all-" + sanitized_challengename, labels={"task": challengename.replace(" ", "-")}
-            ),
+            metadata=V1ObjectMeta(name="deny-all-" + task_name, labels={"task": task_name}),
             spec=V1NetworkPolicySpec(
-                pod_selector=V1LabelSelector(match_labels={"task": taskname}),
+                pod_selector=V1LabelSelector(match_labels={"task": task_name}),
                 policy_types=["Ingress", "Egress"],
                 ingress=[],
                 egress=[],
             ),
         )
         return policy
+
     except ApiException as e:
         if e.status != 403:
-            logger.error(f"API Exception when creating deny-all network policy for {challengename}: {e}")
+            logger.error(f"API Exception when creating deny-all network policy for {task_name}: {e}")
         raise e
 
 
 @retry(**retry_opts)
 def create_network_policy_allow_task(
-    teamname: str, challengename: str, network_pods: list[str], netname: str
+    task_name: str, network_pods: list[str], network_name: str
 ) -> V1NetworkPolicy:
     ensure_kube_config_loaded()
     try:
@@ -502,9 +463,7 @@ def create_network_policy_allow_task(
         policy = V1NetworkPolicy(
             api_version="networking.k8s.io/v1",
             kind="NetworkPolicy",
-            metadata=V1ObjectMeta(
-                name="allow-all-" + netname, labels={"task": challengename.replace(" ", "-")}
-            ),
+            metadata=V1ObjectMeta(name="allow-all-" + network_name, labels={"task": task_name}),
             spec=V1NetworkPolicySpec(
                 pod_selector=pod_selector,
                 policy_types=["Ingress", "Egress"],
@@ -515,93 +474,93 @@ def create_network_policy_allow_task(
         return policy
     except ApiException as e:
         if e.status != 403:
-            logger.error(f"API Exception when creating allow-all network policy for network {netname}: {e}")
+            logger.error(
+                f"API Exception when creating allow-all network policy for network {network_name}: {e}"
+            )
         raise e
 
 
 @retry(**retry_opts)
-async def create_challenge_network_policies(teamname: str, challengename: str) -> None:
+async def create_challenge_network_policies(team_name: str, task_name: str) -> None:
     ensure_kube_config_loaded()
     try:
         net_api = NetworkingV1Api()
-        deny_policy = create_network_policy_deny_all_task(teamname, challengename)
-        net_api.create_namespaced_network_policy(namespace=teamname, body=deny_policy)
+        deny_policy = create_network_policy_deny_all_task(task_name)
+        net_api.create_namespaced_network_policy(namespace=team_name, body=deny_policy)
 
-        networklist = await get_unique_networks(challengename)
-        for netname in networklist:  # understand all networks that will need to be created
-            temp_network_pods = await get_pods_in_network(challengename, netname)
-            network_pods = [x for x in temp_network_pods]  # make a copy
+        task = (await get_task_definition(task_name))["definition"]
 
-            if netname == "teamnet":  # if it is teamnet, include the vpn pod in whitelist
+        for network in task.networks:
+            # TODO: Maybe move this into a helper func
+            network_pods = [x.name for x in task.pods if network in x.networks]
+
+            if AccessEnum.player in network.access:  # if it is teamnet, include the vpn pod in whitelist
                 network_pods.append("vpn-container-pod")
-                netname = netname + "-" + "".join(char for char in challengename.lower())
-                netname = netname.replace(" ", "-")
 
-            allow_policy = create_network_policy_allow_task(teamname, challengename, network_pods, netname)
-            net_api.create_namespaced_network_policy(namespace=teamname, body=allow_policy)
+            allow_policy = create_network_policy_allow_task(task_name, network_pods, network.name)
+            net_api.create_namespaced_network_policy(namespace=team_name, body=allow_policy)
+
     except ApiException as e:
         if e.status != 403:
-            logger.error(f"API Exception when creating challenge network policies for {challengename}: {e}")
+            logger.error(f"API Exception when creating challenge network policies for {task_name}: {e}")
         raise e
 
 
 @retry(**retry_opts)
-def stop_challenge(teamname: str, task: str) -> str:
+def stop_challenge(team_name: str, task_name: str) -> str:
     ensure_kube_config_loaded()
     try:
-        task = task.replace(" ", "-")
-
         core_api = CoreV1Api()
         net_api = NetworkingV1Api()
 
-        label_selector = f"task={task}"
+        label_selector = f"task={task_name}"
 
         # Delete Pods
-        pod_list: V1PodList = core_api.list_namespaced_pod(namespace=teamname, label_selector=label_selector)
+        pod_list: V1PodList = core_api.list_namespaced_pod(namespace=team_name, label_selector=label_selector)
 
         if not pod_list.items:
-            logger.info(f"No pods found with label task={task} in namespace {teamname}")
+            logger.info(f"No pods found with label task={task_name} in namespace {team_name}")
         else:
             for pod in pod_list.items:
                 pod = pod  # type: V1Pod
                 if not pod.metadata:
-                    logger.warning(f"Pod in namespace {teamname} is missing metadata.")
+                    logger.warning(f"Pod in namespace {team_name} is missing metadata.")
                     continue
                 logger.debug(f"Deleting Pod: {pod.metadata.name}")
-                core_api.delete_namespaced_pod(name=pod.metadata.name, namespace=teamname)
+                core_api.delete_namespaced_pod(name=pod.metadata.name, namespace=team_name)
 
         # Delete Services
-        services = core_api.list_namespaced_service(namespace=teamname, label_selector=label_selector)
+        services = core_api.list_namespaced_service(namespace=team_name, label_selector=label_selector)
         for svc in services.items:
             logger.debug(f"Deleting Service: {svc.metadata.name}")
-            core_api.delete_namespaced_service(name=svc.metadata.name, namespace=teamname)
+            core_api.delete_namespaced_service(name=svc.metadata.name, namespace=team_name)
 
         # Delete NetworkPolicies
-        policies = net_api.list_namespaced_network_policy(namespace=teamname, label_selector=label_selector)
+        policies = net_api.list_namespaced_network_policy(namespace=team_name, label_selector=label_selector)
         for policy in policies.items:
             logger.info(f"Deleting NetworkPolicy: {policy.metadata.name}")
-            net_api.delete_namespaced_network_policy(name=policy.metadata.name, namespace=teamname)
+            net_api.delete_namespaced_network_policy(name=policy.metadata.name, namespace=team_name)
 
-        logger.info(f"All resources with label task={task} deleted from namespace {teamname}")
-        return f"All resources with label task={task} deleted from namespace {teamname}"
+        logger.info(f"All resources with label task={task_name} deleted from namespace {team_name}")
+        return f"All resources with label task={task_name} deleted from namespace {team_name}"
     except ApiException as e:
         if e.status != 403:
-            logger.error(f"API Exception when stopping challenge {task} in namespace {teamname}: {e}")
+            logger.error(f"API Exception when stopping challenge {task_name} in namespace {team_name}: {e}")
         raise e
 
 
 @retry(**retry_opts)
-def create_secret_in_namespace(teamname: str, secret_data: V1Secret) -> None:
+def create_secret_in_namespace(team_name: str, secret_data: V1Secret) -> None:
     ensure_kube_config_loaded()
     try:
         core_api = CoreV1Api()
-        core_api.create_namespaced_secret(namespace=teamname, body=secret_data)
-        logger.debug(f"Created secret {secret_data.metadata.name} in namespace {teamname}")  # type: ignore
+        core_api.create_namespaced_secret(namespace=team_name, body=secret_data)
+        logger.debug(f"Created secret {secret_data.metadata.name} in namespace {team_name}")  # type: ignore
     except ApiException as e:
         if e.status != 403:
-            logger.error(f"API Exception when creating secret in namespace {teamname}: {e}")
+            logger.error(f"API Exception when creating secret in namespace {team_name}: {e}")
         else:
-            logger.debug(f"API Exception when creating secret in namespace {teamname}: {e}")
+            logger.debug(f"API Exception when creating secret in namespace {team_name}: {e}")
         raise e
 
 
