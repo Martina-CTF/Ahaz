@@ -6,7 +6,7 @@ from os import getenv
 from typing import AsyncGenerator
 
 from db.collections import get_context
-from db.models import Pod, RegisterStatus, Team, VPNMap, VPNStorage
+from db.models import Pod, RegisterStatus, TaskDefinition, Team, VPNMap, VPNStorage
 from pydantic import BaseModel
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
@@ -23,13 +23,18 @@ def getUTCasStr() -> str:
 async def get_challenges_from_db() -> list[str]:
     database = await get_context()
 
-    return await database.collections.challenges.distinct("name")
+    return await database.collections.task_definitions.distinct("name")
 
 
-async def get_pods(name: str) -> list[Pod]:
+async def get_pods(name: str) -> list[str]:
     database = await get_context()
 
-    return await database.collections.pods.find({"name": name}).to_list(length=None)
+    task: TaskDefinition | None = await database.collections.task_definitions.find_one({"name": name})
+
+    if task is None:
+        raise ValueError("challenge not found in db")
+
+    return [pod.name for pod in task["definition"].pods]
 
 
 # TODO: This fucking sucks, but I am changing the schema anyways so womp womp
@@ -38,30 +43,31 @@ class EnvVarOut(BaseModel):
     value: str
 
 
-async def get_env_vars(k8s_name: str) -> list[EnvVarOut]:
+async def get_env_vars(task_name: str, pod_name: str) -> dict[str, str]:
     database = await get_context()
 
-    aggregate = await database.collections.env_vars.aggregate(
-        [
-            {"$match": {"k8s_name": k8s_name}},
-            {
-                "$project": {
-                    "_id": 0,
-                    "name": {"$toUpper": "$env_var_name"},
-                    "value": "$env_var_value",
-                }
-            },
-        ]
-    )
-    docs = await aggregate.to_list(length=None)
+    docs: TaskDefinition | None = await database.collections.task_definitions.find_one({"name": task_name})
 
-    return [EnvVarOut.model_validate(doc) for doc in docs]
+    if docs is None:
+        raise ValueError("task not found in db")
+
+    pod: Pod | None = next((pod for pod in docs["definition"].pods if pod.name == pod_name), None)
+
+    if pod is None:
+        raise ValueError("pod not found in task")
+
+    return {env_var.name: env_var.value for env_var in pod.env}
 
 
-async def get_k8s_name_networks(k8s_name: str) -> list[str]:
+async def get_task_networks(task_name: str) -> list[str]:
     database = await get_context()
 
-    return await database.collections.net_rules.find({"k8s_name": k8s_name}).distinct("netname")
+    docs: TaskDefinition | None = await database.collections.task_definitions.find_one({"name": task_name})
+
+    if docs is None:
+        raise ValueError("task not found in db")
+
+    return [net.name for net in docs["definition"].networks]
 
 
 async def get_unique_networks(challengename: str) -> list[str]:

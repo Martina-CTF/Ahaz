@@ -2,56 +2,42 @@
 import datetime
 from typing import TypedDict
 
-from pydantic import BaseModel
+from ahaz_common.task import Task as Task
+from pydantic import BaseModel, field_validator
 
 
-class Team(TypedDict):
+class Certificate(TypedDict):
+    serial_number: int
+    common_name: str
+    cert: str
+    private_key: str
+
+
+class CertificateModel(BaseModel):
+    serial_number: int
+    common_name: str
+    cert: str
+    private_key: str
+
+    @field_validator("cert", "private_key")
+    @classmethod
+    def validate_pem(cls, v: str) -> str:
+        if not v.startswith("-----BEGIN") or not v.endswith("-----"):
+            raise ValueError("Invalid PEM format")
+        return v
+
+
+class TaskDefinition(TypedDict):
     name: str
-    # teamID: int # I cbb to reimplement this when I will be changing this schema anyways
+    definition: Task
 
 
-class VPNMap(TypedDict):
-    teamID: str
+class Range(TypedDict):
+    team_id: str
     port: int
 
 
-class VPNStorage(TypedDict):
-    teamID: str
-    username: str
-    config: str
-
-
-class Challenge(TypedDict):
-    name: str
-    ctfd_desc: str
-    ctfd_score: int
-    ctfd_type: str
-
-
-class Pod(TypedDict):
-    name: str
-    k8s_name: str
-    image: str
-    ram: str
-    cpu: int
-    visible: bool
-
-
-class NetRule(TypedDict):
-    name: str
-    netname: str
-    k8s_name: str
-
-
-class EnvVar(TypedDict):
-    name: str
-    k8s_name: str
-    env_var_name: str
-    env_var_value: str
-
-
-class RegisterStatus(TypedDict):
-    name: str
-    user: str
-    state: int
-    timestamp: datetime.datetime
+class TaskDeployment(TypedDict):
+    team_id: str
+    task_name: str
+    expire_time: datetime.datetime

@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from os import getenv
 
-from db.models import Challenge, EnvVar, NetRule, Pod, RegisterStatus, Team, VPNMap, VPNStorage
+from db.models import Certificate, Range, TaskDefinition, TaskDeployment
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
@@ -18,14 +18,10 @@ logger = logging.getLogger()
 
 @dataclass(slots=True)
 class Collections:
-    teams: AsyncCollection[Team]
-    vpnmap: AsyncCollection[VPNMap]
-    vpnstorage: AsyncCollection[VPNStorage]
-    challenges: AsyncCollection[Challenge]
-    pods: AsyncCollection[Pod]
-    net_rules: AsyncCollection[NetRule]
-    env_vars: AsyncCollection[EnvVar]
-    register_status: AsyncCollection[RegisterStatus]
+    certificates: AsyncCollection[Certificate]
+    task_definitions: AsyncCollection[TaskDefinition]
+    ranges: AsyncCollection[Range]
+    task_deployments: AsyncCollection[TaskDeployment]
 
 
 @dataclass(slots=True)
@@ -54,14 +50,10 @@ async def get_context() -> MongoContext:
             client=client,
             db=db,
             collections=Collections(
-                teams=db["teams"],
-                vpnmap=db["vpnmap"],
-                vpnstorage=db["vpnstorage"],
-                challenges=db["challenges"],
-                pods=db["pods"],
-                net_rules=db["net_rules"],
-                env_vars=db["env_vars"],
-                register_status=db["register_status"],
+                certificates=db["certificates"],
+                task_definitions=db["task_definitions"],
+                ranges=db["ranges"],
+                task_deployments=db["task_deployments"],
             ),
         )
 
