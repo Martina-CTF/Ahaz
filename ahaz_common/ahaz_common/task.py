@@ -1,81 +1,89 @@
+import enum
+import re
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
+
+RFC1123_REGEX = re.compile(r"^(?=.{1,63}$)[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$")
 
 
-class BuildArg(BaseModel):
+class AccessEnum(enum.Enum):
+    player = "player"
+    internet = "internet"
+
+
+class NetworkInformation(BaseModel):
+    name: str
+    access: list[AccessEnum]
+
+
+class EnvironmentInformation(BaseModel):
     name: str
     value: str
 
-    def __str__(self):
-        return f"BuildArgs(name={self.name}, value={self.value})"
+
+class LimitInformation(BaseModel):
+    ram: str = "128Mi"
+    cpu: str = "1"
 
 
-class Image(BaseModel):
-    image_name: str
-    build_context: str
-    build_args: Optional[list[BuildArg]] = None
-
-    def __str__(self):
-        return (
-            f"Image(image_name={self.image_name}, build_context={self.build_context}, "
-            f"build_args={self.build_args})"
-        )
-
-
-class TestEnv(BaseModel):
-    exposed_ports: list[str]  # Mapping of container port to host port
-
-    def __str__(self):
-        return f"TestEnv(exposed_ports={self.exposed_ports})"
-
-
-class Pod(BaseModel):
+class ImageInformation(BaseModel):
     name: str
-    # TODO: Support multi-image pods
-    image: Image
-    limits_ram: str
-    limits_cpu: int
-    visible_to_user: bool
-    testing: Optional[TestEnv] = None
+    context: Optional[str] = None
 
-    def __str__(self):
-        return (
-            f"Pod(name={self.name}, image={self.image}, limits_ram={self.limits_ram}, "
-            f"limits_cpu={self.limits_cpu}, visible_to_user={self.visible_to_user}, testing={self.testing})"
-        )
+    def __str__(self) -> str:
+        return f"ImageInformation(name={self.name})"
 
 
-class Network(BaseModel):
+class PodInformation(BaseModel):
     name: str
-    devices: list[str]
+    visible: bool = False
+    image: ImageInformation
+    limits: LimitInformation = LimitInformation()
+    networks: list[str] = []
+    env: list[EnvironmentInformation] = []
 
-    def __str__(self):
-        return f"Networks(name={self.name}, devices={self.devices})"
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not RFC1123_REGEX.match(v):
+            raise ValueError("name must be a valid RFC 1123 subdomain")
+        return v
+
+    def __str__(self) -> str:
+        return f"PodInfo(name={self.name}, visible={self.visible})"
 
 
-class EnvVar(BaseModel):
-    pod_name: str
+class TaskInformation(BaseModel):
     name: str
-    value: str
+    description: Optional[str] = None
+    flag: Optional[str] = None
 
-    def __str__(self):
-        return f"EnvVars(pod_name={self.pod_name}, name={self.name}, value={self.value})"
+    def __str__(self) -> str:
+        return f"TaskInformation(name={self.name})"
 
 
 class Task(BaseModel):
     name: str
-    version: str
-    description: str
-    score: int
-    scoring_type: str
-    pods: list[Pod]
-    networks: list[Network]
-    env_vars: Optional[list[EnvVar]] = None
+    api_version: Optional[str] = "v1"
+    version: Optional[str] = "1.0.0"
+    info: Optional[TaskInformation] = None
+    pods: list[PodInformation] = []
+    networks: list[NetworkInformation] = []
 
-    def __str__(self):
-        return (
-            f"Task(name={self.name}, description={self.description}, score={self.score}, "
-            f"scoring_type={self.scoring_type}, pods={self.pods}, networks={self.networks}, "
-            f"env_vars={self.env_vars})"
-        )
+    @model_validator(mode="after")
+    def fill_info(self):
+        if self.info is None:
+            self.info = TaskInformation(name=self.name)
+        return self
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str) -> str:
+        pattern = r"^\d+\.\d+\.\d+$"
+        if not re.match(pattern, v):
+            raise ValueError("version must be in the format X.Y.Z")
+        return v
+
+    def __str__(self) -> str:
+        return f"Task(name={self.name}, version={self.version})"
