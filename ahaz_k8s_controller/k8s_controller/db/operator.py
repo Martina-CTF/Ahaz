@@ -5,40 +5,15 @@ from contextlib import asynccontextmanager
 from os import getenv
 from typing import AsyncGenerator
 
+from db.collections import get_context
 from db.models import Pod, RegisterStatus, Team, VPNMap, VPNStorage
+from pydantic import BaseModel
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 
-DB_IP = getenv("DB_IP", "10.33.0.3")
-DB_DBNAME = getenv("DB_DBNAME", "ahaz")
-DB_USERNAME = getenv("DB_USERNAME", "dbeaver")
-DB_PASSWORD = getenv("DB_PASSWORD", "dbeaver")
 K8S_IP_RANGE = getenv("K8S_IP_RANGE", "10.42.0.0 255.255.0.0")
 
 logger = logging.getLogger()
-
-connection_map: dict[asyncio.AbstractEventLoop, AsyncMongoClient] = {}
-
-
-async def get_database() -> AsyncDatabase:
-    global connection_map
-
-    loop = asyncio.get_event_loop()
-
-    if loop not in connection_map:
-        logger.debug("Initializing MongoDB connection")
-        connection = AsyncMongoClient(
-            host=DB_IP,
-            username=DB_USERNAME,
-            password=DB_PASSWORD,
-            tls=False,  # TODO: Add TLS support in env vars
-        )
-        connection_map[loop] = connection
-    else:
-        logger.debug("Reusing existing MongoDB connection")
-        connection = connection_map[loop]
-
-    return connection[DB_DBNAME]
 
 
 def getUTCasStr() -> str:
@@ -46,65 +21,74 @@ def getUTCasStr() -> str:
 
 
 async def get_challenges_from_db() -> list[str]:
-    database = await get_database()
+    database = await get_context()
 
-    return await database["challenges"].distinct("name")
-
-
-async def get_pods(name: str) -> list[tuple]:
-    database = await get_database()
-
-    return await database["pods"].find({"name": name}).to_list(length=None)
+    return await database.collections.challenges.distinct("name")
 
 
-async def get_env_vars(k8s_name: str) -> list[dict]:
-    database = await get_database()
+async def get_pods(name: str) -> list[Pod]:
+    database = await get_context()
 
-    return await (
-        await database["env_vars"].aggregate(
-            [
-                {"$match": {"k8s_name": k8s_name}},
-                {
-                    "$project": {
-                        "_id": 0,
-                        "name": {"$toUpper": "$env_var_name"},
-                        "value": "$env_var_value",
-                    }
-                },
-            ]
-        )
-    ).to_list(length=None)
+    return await database.collections.pods.find({"name": name}).to_list(length=None)
+
+
+# TODO: This fucking sucks, but I am changing the schema anyways so womp womp
+class EnvVarOut(BaseModel):
+    name: str
+    value: str
+
+
+async def get_env_vars(k8s_name: str) -> list[EnvVarOut]:
+    database = await get_context()
+
+    aggregate = await database.collections.env_vars.aggregate(
+        [
+            {"$match": {"k8s_name": k8s_name}},
+            {
+                "$project": {
+                    "_id": 0,
+                    "name": {"$toUpper": "$env_var_name"},
+                    "value": "$env_var_value",
+                }
+            },
+        ]
+    )
+    docs = await aggregate.to_list(length=None)
+
+    return [EnvVarOut.model_validate(doc) for doc in docs]
 
 
 async def get_k8s_name_networks(k8s_name: str) -> list[str]:
-    database = await get_database()
+    database = await get_context()
 
-    return await database["net_rules"].find({"k8s_name": k8s_name}).distinct("netname")
+    return await database.collections.net_rules.find({"k8s_name": k8s_name}).distinct("netname")
 
 
 async def get_unique_networks(challengename: str) -> list[str]:
-    database = await get_database()
-    return await database["net_rules"].find({"name": challengename}).distinct("netname")
+    database = await get_context()
+    return await database.collections.net_rules.find({"name": challengename}).distinct("netname")
 
 
 async def get_pods_in_network(challengename: str, netname: str) -> list[str]:
-    database = await get_database()
+    database = await get_context()
 
-    return await database["net_rules"].find({"name": challengename, "netname": netname}).distinct("k8s_name")
+    return await database.collections.net_rules.find({"name": challengename, "netname": netname}).distinct(
+        "k8s_name"
+    )
 
 
 async def get_challenge_from_k8s_name(k8s_name: str) -> str | None:
-    database = await get_database()
-    pod: Pod | None = await database["pods"].find_one({"k8s_name": k8s_name})
+    database = await get_context()
+    pod: Pod | None = await database.collections.pods.find_one({"k8s_name": k8s_name})
 
-    return pod.name if pod else None
+    return pod["name"] if pod else None
 
 
 async def insert_team_into_db(teamname: str) -> None:
-    database = await get_database()
-    if await database["teams"].find_one({"name": teamname}):
+    database = await get_context()
+    if await database.collections.teams.find_one({"name": teamname}):
         raise ValueError("team with that name already exists in db")
-    await database["teams"].insert_one({"name": teamname})
+    await database.collections.teams.insert_one({"name": teamname})
 
 
 async def insert_vpn_port_into_db(teamname: str, port: int) -> str | None:
@@ -113,10 +97,14 @@ async def insert_vpn_port_into_db(teamname: str, port: int) -> str | None:
     if get_port_team(port) is not None:
         return "port " + str(port) + " is already allocated"
 
-    database = await get_database()
-    if get_team_id(teamname) is None:
+    database = await get_context()
+    teamid = await get_team_id(teamname)
+
+    if teamid is None:
         return "team not found in db"
-    await database["vpn_map"].insert_one({"teamID": teamname, "port": port})
+
+    await database.collections.vpnmap.insert_one(VPNMap(teamID=teamid, port=port))
+
     return None
 
 
@@ -143,7 +131,7 @@ def parse_ip_range(ip_range: str) -> str:
 
 
 async def insert_user_vpn_config(teamname: str, username: str, config: str) -> None:
-    database = await get_database()
+    database = await get_context()
 
     config = str(config).replace("\\n", "\n")
     config = config.replace(
@@ -152,68 +140,76 @@ async def insert_user_vpn_config(teamname: str, username: str, config: str) -> N
     config = config.replace("redirect-gateway def1", "")  # remove the rule that replaces all routes with VPN
     config = config + "\ncomp-lzo yes\nallow-compression yes"
 
-    teamid = get_team_id(teamname)
-    await database["vpn_storage"].insert_one({"teamID": teamid, "username": username, "config": config})
+    teamid = await get_team_id(teamname)
+
+    if teamid is None:
+        raise ValueError("team not found in db")
+
+    await database.collections.vpnstorage.insert_one(
+        VPNStorage(teamID=teamid, username=username, config=config)
+    )
 
 
 async def get_team_id(teamname: str) -> str | None:
-    database = await get_database()
+    database = await get_context()
 
-    return await database["teams"].find_one({"name": teamname})
+    team = await database.collections.teams.find_one({"name": teamname})
+
+    return team["name"] if team else None
 
 
-async def get_team_port(teamname: str) -> str | None:
+async def get_team_port(teamname: str) -> int | None:
     teamID = await get_team_id(teamname)
-    database = await get_database()
+    database = await get_context()
 
-    result: VPNMap | None = await database["vpn_map"].find_one({"teamID": teamID})
+    result: VPNMap | None = await database.collections.vpnmap.find_one({"teamID": teamID})
     if result is None:
         return None
-    return result.port
+    return result["port"]
 
 
 async def get_port_team(port: int) -> str | None:
-    database = await get_database()
-    result: VPNMap | None = await database["vpn_map"].find_one({"port": port})
+    database = await get_context()
+    result: VPNMap | None = await database.collections.vpnmap.find_one({"port": port})
     if result is None:
         return None
-    return result.teamID
+    return result["teamID"]
 
 
 async def get_user_vpn_config(teamname: str, username: str) -> str | None:
     teamID = await get_team_id(teamname)
-    database = await get_database()
+    database = await get_context()
 
-    result: VPNStorage | None = await database["vpn_storage"].find_one(
+    result: VPNStorage | None = await database.collections.vpnstorage.find_one(
         {"teamID": teamID, "username": username}
     )
     if result is None:
         return None
-    return result.config
+    return result["config"]
 
 
 async def get_last_port() -> int:
-    database = await get_database()
+    database = await get_context()
 
-    result: VPNMap | None = await database["vpn_map"].find_one(sort=[("port", -1)])
+    result: VPNMap | None = await database.collections.vpnmap.find_one(sort=[("port", -1)])
     if result is None:
         return 0
-    return int(result.port)
+    return int(result["port"])
 
 
 async def delete_team_and_vpn(teamname: str) -> None:
     teamID = await get_team_id(teamname)
-    database = await get_database()
+    database = await get_context()
 
-    await database["register_status"].delete_many({"name": teamname})
-    await database["vpn_map"].delete_many({"teamID": teamID})
-    await database["vpn_storage"].delete_many({"teamID": teamID})
-    await database["teams"].delete_many({"teamID": teamID})
+    await database.collections.register_status.delete_many({"name": teamname})
+    await database.collections.vpnmap.delete_many({"teamID": teamID})
+    await database.collections.vpnstorage.delete_many({"teamID": teamID})
+    await database.collections.teams.delete_many({"teamID": teamID})
 
 
 async def get_registration_progress_team(teamname: str) -> int:
-    database = await get_database()
-    result: RegisterStatus | None = await database["register_status"].find_one(
+    database = await get_context()
+    result: RegisterStatus | None = await database.collections.register_status.find_one(
         {"name": teamname}, sort=[("state", -1)]
     )
 
@@ -225,8 +221,8 @@ async def get_registration_progress_team(teamname: str) -> int:
 
 
 async def get_registration_progress_user(teamname: str, username: str) -> int:
-    database = await get_database()
-    result: RegisterStatus | None = await database["register_status"].find_one(
+    database = await get_context()
+    result: RegisterStatus | None = await database.collections.register_status.find_one(
         {"name": teamname, "user": username}, sort=[("state", -1)]
     )
 
@@ -238,8 +234,8 @@ async def get_registration_progress_user(teamname: str, username: str) -> int:
 
 
 async def set_registration_progress_team(teamname: str, username: str, status: int) -> None:
-    database = await get_database()
-    await database["register_status"].insert_one(
+    database = await get_context()
+    await database.collections.register_status.insert_one(
         {
             "name": teamname,
             "user": username,

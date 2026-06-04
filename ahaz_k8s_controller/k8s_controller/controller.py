@@ -6,7 +6,10 @@ import traceback
 
 import certmanager
 import events
+from ahaz_common.task import Pod
+from db.models import Pod as DBPod
 from db.operator import (
+    EnvVarOut,
     get_challenge_from_k8s_name,
     get_env_vars,
     get_k8s_name_networks,
@@ -224,7 +227,7 @@ async def start_challenge_pod(
         # FIXME: Gb and Gi are not strictly equivalent!
         storage = storage.replace("Gb", "Gi")
         ram = ram.replace("Gb", "Gi")
-        env_vars = await get_env_vars(k8s_name)
+        env_vars: list[EnvVarOut] = await get_env_vars(k8s_name)
         pod_manifest = V1Pod(
             metadata=V1ObjectMeta(
                 name=k8s_name,
@@ -242,7 +245,7 @@ async def start_challenge_pod(
                     V1Container(
                         image=image,
                         name="container",
-                        env=[V1EnvVar(name=var["name"], value=var["value"]) for var in env_vars],
+                        env=[V1EnvVar(name=var.name, value=var.value) for var in env_vars],
                         resources=V1ResourceRequirements(
                             limits={
                                 "memory": ram,
@@ -295,16 +298,23 @@ async def start_challenge_pod(
 async def start_challenge(teamname: str, challengename: str) -> int:
     try:
         logger.info(f"Starting challenge {challengename} for team {teamname}")
-        db_pods_data = await get_pods(challengename)
-        for i in db_pods_data:
-            k8s_name, image, ram, cpu, visible_to_user = i[1:]
+        db_pods_data: list[DBPod] = await get_pods(challengename)
+        for pod in db_pods_data:
             storage = "2Gb"
-            netnames = await get_k8s_name_networks(k8s_name)
+            netnames = await get_k8s_name_networks(pod["k8s_name"])
             networklist = []
             for i in netnames:
                 networklist.append(i.replace("teamnet", teamname))
             await start_challenge_pod(
-                teamname, k8s_name, image, ram, cpu, storage, visible_to_user, networklist, challengename
+                teamname,
+                pod["k8s_name"],
+                pod["image"],
+                pod["ram"],
+                str(pod["cpu"]),
+                storage,
+                pod["visible"],
+                networklist,
+                challengename,
             )
         await create_challenge_network_policies(teamname, challengename)
         return 0
