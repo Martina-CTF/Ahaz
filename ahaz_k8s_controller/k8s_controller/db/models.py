@@ -32,7 +32,7 @@ class TaskDefinition(TypedDict):
     definition: Task
 
 
-class Range(TypedDict):
+class Team(TypedDict):
     team_id: str
     port: int
 

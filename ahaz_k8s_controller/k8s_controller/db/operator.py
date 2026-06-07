@@ -2,7 +2,7 @@ import logging
 from os import getenv
 
 from db.collections import get_context
-from db.models import Range, TaskDefinition
+from db.models import TaskDefinition, Team
 
 K8S_IP_RANGE = getenv("K8S_IP_RANGE", "10.42.0.0 255.255.0.0")
 
@@ -26,10 +26,10 @@ async def get_task_definition(name: str) -> TaskDefinition:
     return task
 
 
-async def get_range(team_id: str) -> Range:
+async def get_range(team_id: str) -> Team:
     database = await get_context()
 
-    team_range: Range | None = await database.collections.ranges.find_one({"team_id": team_id})
+    team_range: Team | None = await database.collections.teams.find_one({"team_id": team_id})
 
     if team_range is None:
         raise ValueError("range not found for team")
