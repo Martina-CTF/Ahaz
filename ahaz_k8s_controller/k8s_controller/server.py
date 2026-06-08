@@ -10,7 +10,8 @@ import redis.asyncio as aioredis
 import uvicorn
 from pydantic import ValidationError
 from quart import Quart, make_response, request
-from work.worker import _recovery_loop, create_tasks
+from work.queue import WorkQueue
+from work.worker import _recovery_loop
 
 from ahaz_common import (
     ChallengeRequest,
@@ -27,6 +28,7 @@ app = Quart(__name__)
 
 REDIS_URL = getenv("REDIS_URL", "redis://localhost:6379")
 redis_client = aioredis.Redis.from_url(REDIS_URL)
+work_queue = WorkQueue(redis_client)
 
 LOGLEVEL = getenv("LOGLEVEL", "INFO").upper()
 logging.basicConfig(
@@ -129,8 +131,7 @@ async def autogenerate():
         port = TEAM_PORT_RANGE_START
 
     # TODO: Make idempotent
-    await create_tasks(
-        redis_client,
+    await work_queue.enqueue_many(
         {
             "gen_cert": {
                 "payload": {
@@ -178,7 +179,7 @@ async def autogenerate():
                     "team_id": request_data.team_id,
                     "user_id": request_data.user_id,
                 },
-                "deps": ["gen_cert"],  # Should have "create_vpn_container"
+                "deps": ["gen_cert"],
             },
             "insert_user_db": {
                 "payload": {
