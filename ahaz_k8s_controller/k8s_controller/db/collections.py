@@ -3,7 +3,11 @@ import logging
 from dataclasses import dataclass
 from os import getenv
 
-from db.models import Certificate, RegisterProgress, TaskDefinition, TaskDeployment, Team
+from db.models.certificate import CertificateDoc
+from db.models.deployment import TaskDeploymentDoc
+from db.models.registerprocess import RegisterProgressDoc
+from db.models.task import TaskDefinitionDoc
+from db.models.team import TeamDoc
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
@@ -18,11 +22,11 @@ logger = logging.getLogger()
 
 @dataclass(slots=True)
 class Collections:
-    certificates: AsyncCollection[Certificate]
-    task_definitions: AsyncCollection[TaskDefinition]
-    teams: AsyncCollection[Team]
-    task_deployments: AsyncCollection[TaskDeployment]
-    register_progress: AsyncCollection[RegisterProgress]
+    certificates: AsyncCollection[CertificateDoc]
+    task_definitions: AsyncCollection[TaskDefinitionDoc]
+    teams: AsyncCollection[TeamDoc]
+    task_deployments: AsyncCollection[TaskDeploymentDoc]
+    register_progress: AsyncCollection[RegisterProgressDoc]
 
 
 @dataclass(slots=True)

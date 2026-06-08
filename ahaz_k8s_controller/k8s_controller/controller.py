@@ -276,7 +276,7 @@ async def start_challenge_pod(team_name: str, pod: PodInformation, task_name: st
 async def start_challenge(team_name: str, task_name: str) -> None:
     try:
         logger.info(f"Starting challenge {task_name} for team {team_name}")
-        task = (await get_task_definition(task_name))["definition"]
+        task = await get_task_definition(task_name)
 
         for pod in task.pods:
             version = task.version if task.version else "latest"
@@ -488,7 +488,7 @@ async def create_challenge_network_policies(team_name: str, task_name: str) -> N
         deny_policy = create_network_policy_deny_all_task(task_name)
         net_api.create_namespaced_network_policy(namespace=team_name, body=deny_policy)
 
-        task = (await get_task_definition(task_name))["definition"]
+        task = await get_task_definition(task_name)
 
         for network in task.networks:
             # TODO: Maybe move this into a helper func

@@ -558,7 +558,7 @@ def get_client_ovpn_config(
 async def get_team_vpn_pod_port(team_id: str) -> int:
     try:
         team_range = await get_range(team_id)
-        return team_range["port"]
+        return team_range.port
     except ValueError:
         # TODO: Team ID might be non-numeric, need to assign port in a different way
         return TEAM_PORT_RANGE_START + int(team_id) - 1
