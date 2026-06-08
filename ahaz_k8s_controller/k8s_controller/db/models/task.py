@@ -1,6 +1,6 @@
 from typing import Optional, TypedDict
 
-from ahaz_common.task import AccessEnum, Task
+from ahaz_common.task import Task
 
 # Defines all the data we might want to store in a DB about a task definition.
 # Subset of Task object from common.
@@ -8,7 +8,7 @@ from ahaz_common.task import AccessEnum, Task
 
 class NetworkInformationDoc(TypedDict):
     name: str
-    access: list[AccessEnum]
+    access: list[str]
 
 
 class EnvironmentInformationDoc(TypedDict):
@@ -47,6 +47,7 @@ class TaskDefinitionDoc(TypedDict):
 
     info: Optional[TaskInformationDoc]
     pods: list[PodInformationDoc]
+    networks: list[NetworkInformationDoc]
 
 
 # TODO: Maybe a better way to drop unnecessary fields, idk.
@@ -71,5 +72,12 @@ def task_to_task_doc(task: Task) -> TaskDefinitionDoc:
                 env=[EnvironmentInformationDoc(name=e.name, value=e.value) for e in pod.env],
             )
             for pod in task.pods
+        ],
+        networks=[
+            NetworkInformationDoc(
+                name=net.name,
+                access=[a.value for a in net.access],
+            )
+            for net in task.networks
         ],
     )

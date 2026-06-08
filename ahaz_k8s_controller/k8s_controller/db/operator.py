@@ -3,7 +3,7 @@ from os import getenv
 
 from ahaz_common.task import Task
 from db.collections import get_context
-from db.models.task import TaskDefinitionDoc
+from db.models.task import TaskDefinitionDoc, task_to_task_doc
 from db.models.team import Team, TeamDoc
 
 K8S_IP_RANGE = getenv("K8S_IP_RANGE", "10.42.0.0 255.255.0.0")
@@ -15,6 +15,18 @@ async def list_challenges() -> list[str]:
     database = await get_context()
 
     return await database.collections.task_definitions.distinct("name")
+
+
+async def push_task_definition(task: Task) -> None:
+    database = await get_context()
+
+    task_doc = task_to_task_doc(task)
+
+    await database.collections.task_definitions.update_one(
+        {"name": task_doc["name"]},
+        {"$set": task_doc},
+        upsert=True,
+    )
 
 
 async def get_task_definition(name: str) -> Task:

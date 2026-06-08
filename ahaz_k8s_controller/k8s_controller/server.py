@@ -9,10 +9,12 @@ from time import sleep
 import certmanager
 import controller
 import uvicorn
+from ahaz_common.task import Task
 from db.operator import (
     get_registration_progress_team,
     get_registration_progress_team_any,
     list_challenges,
+    push_task_definition,
     set_registration_progress_team,
 )
 from events import RedisEventManager
@@ -51,6 +53,19 @@ logging.getLogger("mysql").setLevel(logging.INFO)
 @app.route("/ping", methods=["GET"])
 def ping():
     return "pong", 200, {"Content-Type": "text/plain"}
+
+
+# HACK: Test function to add a task definition to the DB
+@app.route("/task", methods=["POST"])
+async def create_task():
+    try:
+        request_data = Task(**await request.get_json())
+    except ValidationError as e:
+        logger.error(f"Validation error: {e}")
+        return "Invalid request data", 400
+
+    await push_task_definition(request_data)
+    return "Task created successfully", 201
 
 
 @app.route("/start_challenge", methods=["POST", "GET"])
