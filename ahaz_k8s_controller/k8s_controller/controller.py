@@ -6,7 +6,7 @@ import traceback
 
 import certmanager
 import dboperator
-import events
+import redis.asyncio as aioredis
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -83,7 +83,17 @@ def is_valid_kubeconfig(kube_folder: str) -> bool:
 def load_kube_config():
     # Load kube config based on environment
     if is_valid_kubeconfig("/.kube"):
+        print("Loading kubeconfig from /.kube/config")
         config.load_kube_config(config_file="/.kube/config")
+
+        from kubernetes import client
+
+        c = client.Configuration.get_default_copy()
+
+        print(c.host)
+        print(c.ssl_ca_cert)
+        print(c.cert_file)
+        print(c.key_file)
     else:
         config.load_incluster_config()
 
@@ -655,6 +665,7 @@ def create_team_namespace(teamname: str) -> None:
     ensure_kube_config_loaded()
     try:
         core_api = CoreV1Api()
+        logger.debug(f"Creating namespace {teamname}")
         core_api.create_namespace(V1Namespace(metadata=V1ObjectMeta(name=teamname)))
         logger.debug(f"Moving regcred into namespace {teamname}")
 
@@ -921,7 +932,7 @@ def delete_namespace(teamname: str, timeout: int = 300, interval: int = 5) -> in
         raise e
 
 
-async def k8s_watcher(event_manager: events.RedisEventManager) -> None:
+async def k8s_watcher(redis_client: aioredis.Redis) -> None:
     ensure_kube_config_loaded()
     core_api = CoreV1Api()
     w = watch.Watch()
@@ -969,9 +980,7 @@ async def k8s_watcher(event_manager: events.RedisEventManager) -> None:
                 "challenge": challenge_name,
             }
 
-            await event_manager.publish_event(
-                "ahaz_events", json.dumps({"type": "pod_event", "data": event_data})
-            )
+            await redis_client.publish("ahaz_events", json.dumps({"type": "pod_event", "data": event_data}))
         except Exception as e:
             logger.error("Error processing Kubernetes event:")
             logger.error(e)

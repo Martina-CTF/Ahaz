@@ -13,7 +13,6 @@ CREATE table challenges(name varchar(255),ctfd_desc varchar(1024),ctfd_score int
 CREATE table pods(name varchar(255),k8s_name varchar(50),image varchar(1024),ram varchar(32),cpu int, visible_to_user bool);
 CREATE table net_rules(name varchar(255),netname varchar(255),k8s_name varchar(50));
 CREATE table env_vars(name varchar(255),k8s_name varchar(50),env_var_name varchar(1024),env_var_value varchar(1024));
-CREATE table register_status(name varchar(255),user varchar(255),state int,timestamp bigint)
 "
 
 echo "** Finished creating default DB and users"

@@ -17,9 +17,9 @@ ahaz_data/certs/*
 # MySQL database files
 ahaz_data/mysqldb/mysqldb_volume/*
 
-# Redis data files
-ahaz_data/redis/*
-!ahaz_data/redis/.gitkeep
+# Valkey data files
+ahaz_data/valkey/*
+!ahaz_data/valkey/.gitkeep
 
 # Docker Compose override
 docker-compose.override.yaml
