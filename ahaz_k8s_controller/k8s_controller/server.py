@@ -130,7 +130,6 @@ async def autogenerate():
         logger.error(e)
         port = TEAM_PORT_RANGE_START
 
-    # TODO: Make idempotent
     await work_queue.enqueue_many(
         {
             "gen_cert": {
@@ -141,6 +140,7 @@ async def autogenerate():
                     "public_domainname": PUBLIC_DOMAINNAME,
                     "certdir": CERT_DIR_CONTAINER,
                 },
+                "idempotent_on": {"team_id": request_data.team_id},
                 "deps": [],
             },
             "create_namespace": {
@@ -148,6 +148,7 @@ async def autogenerate():
                     "type": "create_namespace",
                     "team_id": request_data.team_id,
                 },
+                "idempotent_on": {"team_id": request_data.team_id},
                 "deps": [],
             },
             "create_vpn_container": {
@@ -155,6 +156,7 @@ async def autogenerate():
                     "type": "create_vpn_container",
                     "team_id": request_data.team_id,
                 },
+                "idempotent_on": {"team_id": request_data.team_id},
                 "deps": ["gen_cert", "create_namespace"],
             },
             "expose_vpn_container": {
@@ -163,6 +165,7 @@ async def autogenerate():
                     "team_id": request_data.team_id,
                     "port": port,
                 },
+                "idempotent_on": {"team_id": request_data.team_id},
                 "deps": ["create_vpn_container"],
             },
             "insert_db": {
@@ -171,6 +174,7 @@ async def autogenerate():
                     "team_id": request_data.team_id,
                     "port": port,
                 },
+                "idempotent_on": {"team_id": request_data.team_id},
                 "deps": [],
             },
             "register_user": {
@@ -179,6 +183,7 @@ async def autogenerate():
                     "team_id": request_data.team_id,
                     "user_id": request_data.user_id,
                 },
+                "idempotent_on": {"team_id": request_data.team_id, "user_id": request_data.user_id},
                 "deps": ["gen_cert"],
             },
             "insert_user_db": {
@@ -187,6 +192,7 @@ async def autogenerate():
                     "team_id": request_data.team_id,
                     "user_id": request_data.user_id,
                 },
+                "idempotent_on": {"team_id": request_data.team_id, "user_id": request_data.user_id},
                 "deps": ["register_user"],
             },
         },
