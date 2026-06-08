@@ -83,17 +83,7 @@ def is_valid_kubeconfig(kube_folder: str) -> bool:
 def load_kube_config():
     # Load kube config based on environment
     if is_valid_kubeconfig("/.kube"):
-        print("Loading kubeconfig from /.kube/config")
         config.load_kube_config(config_file="/.kube/config")
-
-        from kubernetes import client
-
-        c = client.Configuration.get_default_copy()
-
-        print(c.host)
-        print(c.ssl_ca_cert)
-        print(c.cert_file)
-        print(c.key_file)
     else:
         config.load_incluster_config()
 
