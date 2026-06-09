@@ -312,7 +312,7 @@ class WorkQueue:
             except Exception as e:
                 logger.error(f"{worker_id}: invalid {task_id}")
                 logger.debug(f"Error parsing payload for task {task_id}: {e}")
-                await self.mark_complete(task_id)  # This cannot be executed by any worker
+                await self.mark_failed(task_id, abandon=True)  # This cannot be executed by any worker
                 continue
 
     async def mark_complete(self, task_id: str) -> None:
@@ -357,7 +357,7 @@ class WorkQueue:
                     # Atomic failed because something else modified `child_key_name`, retry
                     continue
 
-    async def mark_failed(self, task_id: str) -> None:
+    async def mark_failed(self, task_id: str, abandon: bool = False) -> None:
         key = f"task:{task_id}"
 
         while True:
@@ -380,9 +380,11 @@ class WorkQueue:
 
                     await pipe.hset(key, "attempts", next_attempt)
 
-                    if next_attempt >= max_attempts:
+                    if abandon or next_attempt >= max_attempts:
                         # Max attempts reached. Mark failed and don't retry
-                        await pipe.hset(key, mapping={"state": "failed", "lease_until": 0})
+                        await pipe.hset(
+                            key, mapping={"state": "failed", "lease_until": 0, "attempts": max_attempts}
+                        )
                     else:
                         # Retry immediately
                         await pipe.hset(key, mapping={"state": "pending", "lease_until": 0})
