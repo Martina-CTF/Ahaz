@@ -2,9 +2,10 @@ import logging
 from os import getenv
 
 from ahaz_common.task import Task
-from db.collections import get_context
-from db.models.task import TaskDefinitionDoc, task_to_task_doc
-from db.models.team import Team, TeamDoc
+
+from .collections import get_context
+from .models.task import TaskDefinitionDoc, task_to_task_doc
+from .models.team import Team, TeamDoc
 
 K8S_IP_RANGE = getenv("K8S_IP_RANGE", "10.42.0.0 255.255.0.0")
 

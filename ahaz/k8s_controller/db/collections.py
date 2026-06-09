@@ -3,14 +3,15 @@ import logging
 from dataclasses import dataclass
 from os import getenv
 
-from db.models.certificate import CertificateDoc
-from db.models.deployment import TaskDeploymentDoc
-from db.models.registerprocess import RegisterProgressDoc
-from db.models.task import TaskDefinitionDoc
-from db.models.team import TeamDoc
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
+
+from .models.certificate import CertificateDoc
+from .models.deployment import TaskDeploymentDoc
+from .models.registerprocess import RegisterProgressDoc
+from .models.task import TaskDefinitionDoc
+from .models.team import TeamDoc
 
 DB_IP = getenv("DB_IP", "10.33.0.3")
 DB_DBNAME = getenv("DB_DBNAME", "ahaz")
