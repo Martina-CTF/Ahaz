@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from os import getenv
+import os
 from threading import Thread
 
 import controller
@@ -11,7 +11,6 @@ import uvicorn
 from pydantic import ValidationError
 from quart import Quart, make_response, request
 from work.queue import WorkQueue
-from work.worker import _recovery_loop
 
 from ahaz_common import (
     ChallengeRequest,
@@ -20,17 +19,17 @@ from ahaz_common import (
     UserRequest,
 )
 
-CERT_DIR_CONTAINER = getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
-PUBLIC_DOMAINNAME = getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
-TEAM_PORT_RANGE_START = int(getenv("TEAM_PORT_RANGE_START", 31200))
+CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
+PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
+TEAM_PORT_RANGE_START = int(os.getenv("TEAM_PORT_RANGE_START", 31200))
 
 app = Quart(__name__)
 
-REDIS_URL = getenv("REDIS_URL", "redis://localhost:6379")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client = aioredis.Redis.from_url(REDIS_URL)
 work_queue = WorkQueue(redis_client)
 
-LOGLEVEL = getenv("LOGLEVEL", "INFO").upper()
+LOGLEVEL = os.getenv("LOGLEVEL", "INFO").upper()
 logging.basicConfig(
     level=LOGLEVEL,
     format="[%(asctime)s | %(levelname)s | %(filename)s:%(lineno)d] %(message)s",
@@ -247,22 +246,44 @@ async def events():
     return response
 
 
-if __name__ == "__main__":
-    # Spawn worker processes
-    import os
-    import subprocess
+async def worker_service(worker_count: int):
     import sys
 
-    for _ in range(8):
-        # These need to inherit our environment
-        subprocess.Popen(
-            [sys.executable, os.path.join(os.path.dirname(__file__), "work/worker.py")], env=os.environ
+    processes = [{"type": "recovery", "process": None}] + [
+        {"type": "worker", "process": None} for _ in range(worker_count)
+    ]
+
+    while True:
+        # Spawn missing processes
+        for p in processes:
+            if p["process"] is not None:
+                continue
+            process_args = [os.path.join(os.path.dirname(__file__), "work/worker.py")]
+            if p["type"] == "recovery":
+                process_args.append("recovery")
+            process = await asyncio.create_subprocess_exec(sys.executable, *process_args, env=os.environ)
+            p["process"] = process
+
+        # Wait on any child process to exit
+        await asyncio.wait(
+            [asyncio.create_task(p["process"].wait()) for p in processes if p["process"] is not None],
+            return_when=asyncio.FIRST_COMPLETED,
         )
 
-    # Dedicated thread for recovery
+        # Check which process died and mark it as None to respawn
+        for p in processes:
+            process: asyncio.subprocess.Process = p["process"]
+            if process is not None and process.returncode is not None:
+                logger.info(
+                    f"{p['type']} process with PID {process.pid} exited with code {process.returncode}"
+                )
+                p["process"] = None
+
+
+if __name__ == "__main__":
     Thread(
         target=asyncio.new_event_loop().run_until_complete,
-        args=(_recovery_loop(redis_client),),
+        args=(worker_service(int(os.getenv("WORKER_COUNT", 4))),),
         daemon=True,
     ).start()
 
