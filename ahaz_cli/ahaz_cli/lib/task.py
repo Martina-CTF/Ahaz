@@ -1,6 +1,7 @@
 import logging
 
 import yaml
+
 from ahaz_common import Task
 
 log = logging.getLogger()
