@@ -1,15 +1,16 @@
 import hashlib
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, NotRequired, TypedDict
 
 import redis.asyncio as aioredis
 
-MAX_ATTEMPTS = 5
-LEASE_SECONDS = 30
-WORK_QUEUE = "work:runnable"
+MAX_ATTEMPTS = int(os.getenv("WORKER_MAX_ATTEMPTS", "5"))
+LEASE_SECONDS = int(os.getenv("WORKER_LEASE_SECONDS", "30"))
+WORK_QUEUE = os.getenv("WORK_QUEUE_KEY", "work:runnable")
 
 logger = logging.getLogger()
 
@@ -71,11 +72,11 @@ class WorkQueue:
         for name, work in tasks.items():
             for dep in work["deps"]:
                 if dep not in tasks:
-                    raise Exception(f"Task {name} has unmeetable dependency: {dep}")
+                    raise ValueError(f"Task {name} has unmeetable dependency: {dep}")
 
         # Check for circular dependencies
         if _has_circular_dependencies(tasks):
-            raise Exception("Tasks have circular dependencies")
+            raise ValueError("Tasks have circular dependencies")
 
         # Generate UUIDs for all tasks first, so we can reference them when setting up dependencies
         task_ids = {name: f"{name}-{uuid.uuid4()}" for name in tasks.keys()}
@@ -114,29 +115,25 @@ class WorkQueue:
         # Now insert tasks without dependencies
         for task_id, work in normalized_tasks.items():
             if len(work["deps"]) == 0:
-                id = await self.enqueue(work, id=task_id)
+                id = await self.enqueue(work, task_id)
                 id_list.append(id)
 
         return id_list
 
     async def idempotency(self, idempotency_key: str, task_id: str) -> str | None:
-        while True:
-            try:
-                async with self.redis_client.pipeline() as pipe:
-                    if idempotency_key is not None:
-                        await pipe.watch(idempotency_key)
-                        existing_id = await pipe.get(idempotency_key)
+        await self.redis_client.setnx(idempotency_key, task_id)
+        id = await self.redis_client.get(idempotency_key)
 
-                        if existing_id is not None:
-                            await pipe.unwatch()
-                            return existing_id.decode() if isinstance(existing_id, bytes) else existing_id
+        if id is None:
+            raise Exception("idempotency key was just set but now cannot be found??")
 
-                        await pipe.hset(idempotency_key, task_id)
-                        await pipe.execute()
+        if isinstance(id, bytes):
+            id = id.decode()
 
-                    return None
-            except aioredis.WatchError:
-                continue
+        if id != task_id:
+            return id
+
+        return None
 
     async def enqueue(self, work: Work, id: str | None = None) -> str:
         idempotent_on = work.get("idempotent_on")

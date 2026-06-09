@@ -167,4 +167,8 @@ if __name__ == "__main__":
     worker_id = str(uuid.uuid4())
     redis_client = aioredis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=None)
     loop = asyncio.new_event_loop()
-    loop.run_until_complete(_worker_loop(worker_id, redis_client))
+
+    if len(sys.argv) > 1 and sys.argv[1] == "recovery":
+        loop.run_until_complete(_recovery_loop(redis_client))
+    else:
+        loop.run_until_complete(_worker_loop(worker_id, redis_client))
