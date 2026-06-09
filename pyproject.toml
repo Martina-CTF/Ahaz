@@ -3,12 +3,12 @@ name = "ahaz"
 version = "0.0.1"
 description = "Monorepo for Ahaz"
 readme = "README.md"
-authors = [{ name = "auseklitis" }, { name = "towergame" }, { name = "SwanX1"}]
+authors = [{ name = "auseklitis" }, { name = "towergame" }, { name = "SwanX1" }]
 requires-python = ">=3.12"
 dependencies = []
 
 [tool.uv.workspace]
-members = ["ahaz_k8s_controller", "ahaz_common", "ahaz_cli", "ahaz_devtools"]
+members = ["ahaz", "common", "cli", "devtools"]
 
 [tool.ruff]
 line-length = 110
@@ -24,10 +24,3 @@ max-complexity = 10
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
-
-[[tool.uv.index]]
-name = "mctf2025"
-url = "https://git.0x10.lv/api/packages/towergame/pypi/simple"
-publish-url = "https://git.0x10.lv/api/packages/towergame/pypi"
-explicit = true
-authenticate = "always"

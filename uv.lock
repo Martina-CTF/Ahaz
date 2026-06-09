@@ -19,7 +19,7 @@ source = { virtual = "." }
 [[package]]
 name = "ahaz-cli"
 version = "0.0.4"
-source = { virtual = "ahaz_cli" }
+source = { virtual = "cli" }
 dependencies = [
     { name = "ahaz-common" },
     { name = "docker" },
@@ -30,7 +30,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ahaz-common", editable = "ahaz_common" },
+    { name = "ahaz-common", editable = "common" },
     { name = "docker", specifier = ">=7.1.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich", specifier = ">=14.2.0" },
@@ -40,7 +40,7 @@ requires-dist = [
 [[package]]
 name = "ahaz-common"
 version = "0.0.1"
-source = { editable = "ahaz_common" }
+source = { editable = "common" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -51,7 +51,7 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.12.3" }]
 [[package]]
 name = "ahaz-devtools"
 version = "0.0.1"
-source = { editable = "ahaz_devtools" }
+source = { editable = "devtools" }
 dependencies = [
     { name = "docker" },
     { name = "kubernetes" },
@@ -70,7 +70,7 @@ requires-dist = [
 [[package]]
 name = "ahaz-k8s-controller"
 version = "1.0.0"
-source = { editable = "ahaz_k8s_controller" }
+source = { editable = "ahaz" }
 dependencies = [
     { name = "ahaz-common" },
     { name = "asyncio" },
@@ -87,7 +87,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ahaz-common", editable = "ahaz_common" },
+    { name = "ahaz-common", editable = "common" },
     { name = "asyncio", specifier = ">=4.0.0" },
     { name = "cryptography", specifier = ">=46.0.3" },
     { name = "kubernetes", specifier = ">=34.1.0" },
