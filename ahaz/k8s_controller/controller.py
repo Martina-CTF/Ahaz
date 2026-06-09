@@ -4,10 +4,7 @@ import os
 import time
 import traceback
 
-import certmanager
-import events
 from ahaz_common.task import AccessEnum, PodInformation
-from db.operator import get_task_definition
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -50,6 +47,21 @@ from kubernetes.client import (
 )
 from kubernetes.client.rest import ApiException
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+
+from .certmanager import (
+    generate_user,
+    get_down_script,
+    get_openvpn_env,
+    get_server_ca,
+    get_server_cert,
+    get_server_key,
+    get_server_ovpn_config,
+    get_server_ta,
+    get_up_script,
+    get_user,
+)
+from .db.operator import get_task_definition
+from .events import RedisEventManager
 
 # This file has `#type: ignore` comments to ignore type checking errors from the kubernetes client library,
 # which has weird/bad type annotations.
@@ -203,7 +215,6 @@ async def start_challenge_pod(team_name: str, pod: PodInformation, task_name: st
     ensure_kube_config_loaded()
     try:
         core_api = CoreV1Api()
-
         pod_manifest = V1Pod(
             metadata=V1ObjectMeta(
                 name=pod.name,
@@ -668,14 +679,14 @@ def create_team_vpn_configmap(teamname) -> None:
         core_api = CoreV1Api()
         teamCertDir = CERT_DIR_CONTAINER + teamname
 
-        ovpn_config = certmanager.get_server_ovpn_config(teamCertDir)
-        server_key = certmanager.get_server_key(teamCertDir)
-        server_cert = certmanager.get_server_cert(teamCertDir)
-        server_ca = certmanager.get_server_ca(teamCertDir)
-        server_ta = certmanager.get_server_ta(teamCertDir)
-        ovpn_env = certmanager.get_openvpn_env(teamCertDir)
-        up_script = certmanager.get_up_script(teamCertDir)
-        down_script = certmanager.get_down_script(teamCertDir)
+        ovpn_config = get_server_ovpn_config(teamCertDir)
+        server_key = get_server_key(teamCertDir)
+        server_cert = get_server_cert(teamCertDir)
+        server_ca = get_server_ca(teamCertDir)
+        server_ta = get_server_ta(teamCertDir)
+        ovpn_env = get_openvpn_env(teamCertDir)
+        up_script = get_up_script(teamCertDir)
+        down_script = get_down_script(teamCertDir)
 
         config_map = V1ConfigMap(
             api_version="v1",
@@ -835,13 +846,13 @@ def expose_team_vpn_container(teamname: str, externalport: int) -> None:
 # TODO: I just completely sidestepped the fckn DB for configs, need to move it to cert-based logic lmao
 async def register_user_ovpn(team_name: str, user_name: str) -> str:
     vpnDirLocation = CERT_DIR_CONTAINER + team_name
-    await certmanager.generate_user(team_name, user_name, vpnDirLocation)
+    await generate_user(team_name, user_name, vpnDirLocation)
     return "successfully registered"
 
 
 def obtain_user_ovpn_config(teamname: str, username: str) -> str:
     vpnDirLocation = CERT_DIR_CONTAINER + teamname
-    result = certmanager.get_user(teamname, username, vpnDirLocation)
+    result = get_user(teamname, username, vpnDirLocation)
     result = str(result).replace("\\n", "\n")
     return result
 
@@ -896,7 +907,7 @@ def delete_namespace(teamname: str, timeout: int = 300, interval: int = 5) -> in
         raise e
 
 
-async def k8s_watcher(event_manager: events.RedisEventManager) -> None:
+async def k8s_watcher(event_manager: RedisEventManager) -> None:
     ensure_kube_config_loaded()
     core_api = CoreV1Api()
     w = watch.Watch()

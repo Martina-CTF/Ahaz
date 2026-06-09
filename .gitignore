@@ -7,22 +7,22 @@ build/
 *.egg-info/
 
 # Kubernetes configuration files
-ahaz_data/kubectl/*
-!ahaz_data/kubectl/config.example.yml
+data/kubectl/*
+!data/kubectl/config.example.yml
 
 # OpenVPN certificates
-ahaz_data/certs/*
-!ahaz_data/certs/.gitkeep
+data/certs/*
+!data/certs/.gitkeep
 
 # MySQL database files
-ahaz_data/mysqldb/mysqldb_volume/*
+data/mysqldb/mysqldb_volume/*
 
 # MongoDB data files
 ahaz_data/mongodb/*
 
 # Redis data files
-ahaz_data/redis/*
-!ahaz_data/redis/.gitkeep
+data/redis/*
+!data/redis/.gitkeep
 
 # Docker Compose override
 docker-compose.override.yaml

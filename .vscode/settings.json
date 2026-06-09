@@ -12,7 +12,7 @@
     "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
     "python.analysis.extraPaths": [
         // Fixes import in VSCode, even though it should already work like this..
-        "${workspaceFolder}/ahaz_common"
+        "${workspaceFolder}/common"
     ],
     "python.analysis.typeCheckingMode": "standard",
     "python.analysis.autoImportCompletions": true,
@@ -23,6 +23,6 @@
     "basedpyright.analysis.autoImportCompletions": true,
     "basedpyright.analysis.typeCheckingMode": "standard",
     "basedpyright.analysis.extraPaths": [
-        "${workspaceFolder}/ahaz_common"
+        "${workspaceFolder}/common"
     ]
 }

@@ -10,8 +10,8 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./ahaz_data/certs/:/certdir
-      - ./ahaz_data/kubectl:/.kube/
+      - ./data/certs/:/certdir
+      - ./data/kubectl:/.kube/
     environment:
       CERT_DIR_CONTAINER: "/certdir/"
       DB_IP: "db"
@@ -32,18 +32,6 @@ services:
     networks:
       internal:
       default:
-  # db:
-  #   image: mysql:9.5
-  #   volumes:
-  #     - ./ahaz_data/mysqldb/mysqldb_volume:/var/lib/mysql
-  #     - ./ahaz_data/mysqldb/init.sh:/docker-entrypoint-initdb.d/init.sh
-  #   environment:
-  #     MYSQL_ROOT_PASSWORD: "shooch4SXe2iech9Aiv1do0pISuh8xeaahDe3WoTvoowae4Xahl0eZ1NDutaegh2"
-  #     MYSQL_DATABASE: "ahaz"
-  #     MYSQL_USER: "dbeaver"
-  #     MYSQL_PASSWORD: "dbeaver"
-  #   networks:
-  #     internal:
   db: 
     image: mongo:8.3.2
     environment:
@@ -52,7 +40,7 @@ services:
       MONGO_INITDB_DATABASE: "ahaz"
       GLIBC_TUNABLES: "glibc.pthread.rseq=1" # fixes a bug in mongo where it hates newer kernels, see https://jira.mongodb.org/browse/SERVER-121912
     volumes:
-      - ./ahaz_data/mongodb:/data/db
+      - ./data/mongodb:/data/db
     networks:
       internal:
     # FIXME: Disable me in prod!
@@ -62,7 +50,7 @@ services:
     image: redis:4
     restart: always
     volumes:
-      - ./ahaz_data/redis:/data
+      - ./data/redis:/data
     networks:
       internal:
 networks:

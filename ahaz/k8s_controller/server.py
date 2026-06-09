@@ -6,27 +6,37 @@ from os import getenv
 from threading import Thread
 from time import sleep
 
-import certmanager
-import controller
 import uvicorn
-from ahaz_common.task import Task
-from db.operator import (
-    get_registration_progress_team,
-    get_registration_progress_team_any,
-    list_challenges,
-    push_task_definition,
-    set_registration_progress_team,
-)
-from events import RedisEventManager
-from pydantic import ValidationError
-from quart import Quart, make_response, request
-
 from ahaz_common import (
     ChallengeRequest,
     RegisterTeamRequest,
     TeamRequest,
     UserRequest,
 )
+from ahaz_common.task import Task
+from pydantic import ValidationError
+from quart import Quart, make_response, request
+
+from .certmanager import del_team, gen_team, get_user, user_exists
+from .controller import (
+    create_team_namespace,
+    create_team_vpn_container,
+    delete_namespace,
+    expose_team_vpn_container,
+    get_pods_namespace,
+    k8s_watcher,
+    register_user_ovpn,
+    start_challenge,
+    stop_challenge,
+)
+from .db.operator import (
+    get_registration_progress_team,
+    get_registration_progress_team_any,
+    list_challenges,
+    push_task_definition,
+    set_registration_progress_team,
+)
+from .events import RedisEventManager
 
 CERT_DIR_CONTAINER = getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
 PUBLIC_DOMAINNAME = getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
@@ -69,7 +79,7 @@ async def create_task():
 
 
 @app.route("/start_challenge", methods=["POST", "GET"])
-async def start_challenge():
+async def start_challenge_request():
     try:
         request_data = ChallengeRequest(**await request.get_json())
     except ValidationError as e:
@@ -80,14 +90,14 @@ async def start_challenge():
         f"Received start challenge request for challenge {request_data.challenge_id}"
         + f" from {request_data.team_id}"
     )
-    status = controller.start_challenge(request_data.team_id, request_data.challenge_id)
+    status = start_challenge(request_data.team_id, request_data.challenge_id)
     if status == 0:
         status = "successfully created challenge"
     return str(status), 200
 
 
 @app.route("/stop_challenge", methods=["POST", "GET"])
-async def stop_challenge():
+async def stop_challenge_request():
     try:
         request_data = ChallengeRequest(**await request.get_json())
     except ValidationError as e:
@@ -98,7 +108,7 @@ async def stop_challenge():
         f"Received stop challenge request for challenge {request_data.challenge_id}"
         + f" from {request_data.team_id}"
     )
-    status = controller.stop_challenge(request_data.team_id, request_data.challenge_id)
+    status = stop_challenge(request_data.team_id, request_data.challenge_id)
     return status
 
 
@@ -109,7 +119,7 @@ async def get_challenges():
 
 
 @app.route("/get_pods_namespace", methods=["GET"])
-async def get_pods_namespace():
+async def get_pods_namespace_request():
     try:
         request_data = TeamRequest(**await request.get_json())
     except ValidationError as e:
@@ -117,7 +127,7 @@ async def get_pods_namespace():
         return "Invalid request data", 400
 
     logger.info(f"Getting pods for team {request_data.team_id}")
-    podresult = controller.get_pods_namespace(str(request_data.team_id), False)
+    podresult = get_pods_namespace(str(request_data.team_id), False)
     logger.debug(f"Pods for team {request_data.team_id}:\n{podresult}")
     return podresult
 
@@ -126,7 +136,7 @@ async def register_user_threaded(request_data: UserRequest):
     logger.info(f"Registering user {request_data.user_id} to team {request_data.team_id}...")
 
     logger.debug("About to register user in docker")
-    await controller.register_user_ovpn(team_name=request_data.team_id, user_name=request_data.user_id)
+    await register_user_ovpn(team_name=request_data.team_id, user_name=request_data.user_id)
 
     # TODO: Sidestepping DB for now, need to refactor for the logic to be cert-based
     # Might just merge #8 into this branch lmao
@@ -136,7 +146,6 @@ async def register_user_threaded(request_data: UserRequest):
     # logger.debug("About to insert config into db")
     # await insert_user_vpn_config(teamname=request_data.team_id, username=request_data.user_id, config=config)  # noqa: E501
     # logger.debug("Successfully added a user to db")
-
     return "successfully added a user to db"
 
 
@@ -149,7 +158,7 @@ async def adduser():
         return "Invalid request data", 400
 
     teamVPNDirectory = CERT_DIR_CONTAINER + request_data.team_id
-    if not await certmanager.user_exists(request_data.user_id, teamVPNDirectory):
+    if not await user_exists(request_data.user_id, teamVPNDirectory):
         logger.info(f"User {request_data.user_id} already exists in team {request_data.team_id}")
         return "user already registered", 400
 
@@ -165,7 +174,7 @@ async def getuser():
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
 
-    config = await certmanager.get_user(
+    config = await get_user(
         request_data.team_id, request_data.user_id, CERT_DIR_CONTAINER + request_data.team_id
     )
 
@@ -178,18 +187,18 @@ async def getuser():
 async def gen_team_from_flask_for_subprocess(request_data: RegisterTeamRequest) -> str:
     try:
         logger.debug("doing except")
-        certmanager.gen_team(
+        gen_team(
             request_data.team_id,
             request_data.domain_name,
             request_data.port,
             request_data.protocol,
             CERT_DIR_CONTAINER,
         )
-        controller.create_team_namespace(request_data.team_id)
+        create_team_namespace(request_data.team_id)
         logger.debug("=8")
-        controller.create_team_vpn_container(request_data.team_id)
+        create_team_vpn_container(request_data.team_id)
         logger.debug("about to expose team vpn container")
-        controller.expose_team_vpn_container(request_data.team_id, request_data.port)
+        expose_team_vpn_container(request_data.team_id, request_data.port)
         # logger.debug("=9")
         # await insert_team_into_db(request_data.team_id)
         # await insert_vpn_port_into_db(request_data.team_id, request_data.port)
@@ -248,19 +257,19 @@ async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:  #
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 1)
             logger.debug("started registration proces for a team")
 
-            certmanager.gen_team(request_data.team_id, PUBLIC_DOMAINNAME, port, "tcp", CERT_DIR_CONTAINER)
+            gen_team(request_data.team_id, PUBLIC_DOMAINNAME, port, "tcp", CERT_DIR_CONTAINER)
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 2)
             logger.debug(f"generated certificates for team {request_data.team_id}")
 
-            controller.create_team_namespace(request_data.team_id)
+            create_team_namespace(request_data.team_id)
             logger.debug(f"created namespace for team {request_data.team_id}")
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 3)
-            controller.create_team_vpn_container(request_data.team_id)
+            create_team_vpn_container(request_data.team_id)
             logger.debug(f"created VPN Container for team {request_data.team_id}")
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 4)
-            controller.expose_team_vpn_container(request_data.team_id, port)
+            expose_team_vpn_container(request_data.team_id, port)
             logger.debug(f"exposed VPN Container for team {request_data.team_id}")
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 5)
@@ -300,7 +309,7 @@ async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:  #
         ):  # if user isn't registered or this was the user that first called the team registration
             logger.debug("about to register user ovpn config")
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 7)
-            await controller.register_user_ovpn(request_data.team_id, request_data.user_id)
+            await register_user_ovpn(request_data.team_id, request_data.user_id)
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 8)
             # logger.debug("about to obtain config")
@@ -355,11 +364,11 @@ async def autogenerate():
 
 async def del_team_subprocess(request_data: UserRequest | TeamRequest, reregister=False) -> None:
     logger.debug(str(request_data.team_id) + " called del_team_subprocess, about to delete namespace")
-    controller.delete_namespace(request_data.team_id)
+    delete_namespace(request_data.team_id)
     logger.debug(
         str(request_data.team_id) + " namespace deleted, about to delete team VPN directory for team"
     )
-    certmanager.del_team(request_data.team_id, CERT_DIR_CONTAINER)
+    del_team(request_data.team_id, CERT_DIR_CONTAINER)
     logger.debug(
         str(request_data.team_id) + " cert Directory deleted, about to remove entries of team from db"
     )
@@ -396,7 +405,7 @@ async def regenerate():
 
 # TODO: add token
 @app.route("/del_team", methods=["POST"])
-async def del_team():
+async def del_team_request():
     try:
         request_data = TeamRequest(**await request.get_json())
     except ValidationError as e:
@@ -455,11 +464,12 @@ async def events():
     return response
 
 
-if __name__ == "__main__":
+def main():
     Thread(
         # This is an async function, but we are in a thread, so we need to run it in an event loop
         target=asyncio.run,
-        args=(controller.k8s_watcher(redis_event_manager),),
+        args=(k8s_watcher(redis_event_manager),),
         daemon=True,
     ).start()
-    uvicorn.run("server:app", host="0.0.0.0", port=5000, workers=4)
+
+    uvicorn.run("k8s_controller.server:app", host="0.0.0.0", port=5000, workers=4)
