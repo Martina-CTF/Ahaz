@@ -14,6 +14,7 @@ from ahaz_common import (
     UserRequest,
 )
 from ahaz_common.task import Task
+from k8s_controller.db.collections import init_db
 from pydantic import ValidationError
 from quart import Quart, make_response, request
 
@@ -468,6 +469,12 @@ async def events():
     response.timeout = None  # type: ignore
 
     return response
+
+
+@app.before_serving
+async def startup():
+    logger.info("Initializing database...")
+    await init_db()
 
 
 def main():

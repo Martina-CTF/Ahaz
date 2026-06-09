@@ -9,6 +9,7 @@ class CertificateDoc(TypedDict):
     common_name: str
     cert: str
     private_key: str
+    # TODO: Expiration data, to let MongoDB automatically delete expired certs
 
 
 class Certificate(BaseModel):

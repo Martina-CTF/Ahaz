@@ -43,6 +43,28 @@ class MongoContext:
 contexts: dict[asyncio.AbstractEventLoop, MongoContext] = {}
 
 
+async def init_indexes(collections: Collections) -> None:
+    # Certificates
+    await collections.certificates.create_index("serial_number", unique=True)
+    await collections.certificates.create_index("common_name", unique=False)
+
+    # Teams
+    await collections.teams.create_index("team_id", unique=True)
+
+    # Task Deployments
+    await collections.task_deployments.create_index([("team_id", 1), ("task_name", 1)], unique=True)
+    await collections.task_deployments.create_index("expire_time", expireAfterSeconds=0)
+
+    # Task Definitions
+    await collections.task_definitions.create_index("name", unique=True)
+
+
+async def init_db():
+    context = await get_context()
+    await init_indexes(context.collections)
+    await close_context()
+
+
 async def get_context() -> MongoContext:
     loop = asyncio.get_running_loop()
 
