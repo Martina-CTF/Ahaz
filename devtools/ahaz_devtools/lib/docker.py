@@ -6,9 +6,9 @@ from pathlib import Path
 
 import docker
 import docker.errors
-from ahaz_devtools.lib.subprocess import execute_into_logger
 
 from .config import REGISTRY_NAME
+from .subprocess import execute_into_logger
 
 logger = logging.getLogger(__name__)
 

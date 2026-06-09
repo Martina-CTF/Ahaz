@@ -7,15 +7,14 @@ from threading import Thread
 from time import sleep
 
 import uvicorn
-from pydantic import ValidationError
-from quart import Quart, make_response, request
-
 from ahaz_common import (
     ChallengeRequest,
     RegisterTeamRequest,
     TeamRequest,
     UserRequest,
 )
+from pydantic import ValidationError
+from quart import Quart, make_response, request
 
 from .certmanager import del_team, gen_team
 from .controller import (
@@ -450,4 +449,4 @@ def main():
         daemon=True,
     ).start()
 
-    uvicorn.run("k8s_controller.server:app", host="0.0.0.0", port=5000, workers=4)
+    uvicorn.run("ahaz_k8s_controller.server:app", host="0.0.0.0", port=5000, workers=4)
