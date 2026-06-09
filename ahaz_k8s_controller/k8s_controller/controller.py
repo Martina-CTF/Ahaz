@@ -4,9 +4,6 @@ import os
 import time
 import traceback
 
-import certmanager
-import dboperator
-import events
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -49,6 +46,29 @@ from kubernetes.client import (
 )
 from kubernetes.client.rest import ApiException
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+
+from .certmanager import (
+    generate_user,
+    get_down_script,
+    get_openvpn_env,
+    get_server_ca,
+    get_server_cert,
+    get_server_key,
+    get_server_ovpn_config,
+    get_server_ta,
+    get_up_script,
+    get_user,
+)
+from .dboperator import (
+    get_challenge_from_k8s_name,
+    get_env_vars,
+    get_k8s_name_networks,
+    get_pods,
+    get_pods_in_network,
+    get_unique_networks,
+    insert_user_vpn_config,
+)
+from .events import RedisEventManager
 
 # This file has `#type: ignore` comments to ignore type checking errors from the kubernetes client library,
 # which has weird/bad type annotations.
@@ -216,7 +236,7 @@ def start_challenge_pod(
         # FIXME: Gb and Gi are not strictly equivalent!
         storage = storage.replace("Gb", "Gi")
         ram = ram.replace("Gb", "Gi")
-        env_vars = dboperator.get_env_vars(k8s_name)
+        env_vars = get_env_vars(k8s_name)
         pod_manifest = V1Pod(
             metadata=V1ObjectMeta(
                 name=k8s_name,
@@ -287,11 +307,11 @@ def start_challenge_pod(
 def start_challenge(teamname: str, challengename: str) -> int:
     try:
         logger.info(f"Starting challenge {challengename} for team {teamname}")
-        db_pods_data = dboperator.get_pods(challengename)
+        db_pods_data = get_pods(challengename)
         for i in db_pods_data:
             k8s_name, image, ram, cpu, visible_to_user = i[1:]
             storage = "2Gb"
-            netnames = dboperator.get_k8s_name_networks(k8s_name)
+            netnames = get_k8s_name_networks(k8s_name)
             networklist = []
             for i in netnames:
                 networklist.append(i.replace("teamnet", teamname))
@@ -350,9 +370,7 @@ def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[dict[s
             "status": state,
             "ip": pod.status.pod_ip,
             "visibleIP": pod_visible,
-            "task": dboperator.get_challenge_from_k8s_name(pod.metadata.labels["name"])
-            if not is_vpn
-            else None,
+            "task": get_challenge_from_k8s_name(pod.metadata.labels["name"]) if not is_vpn else None,
             "name": pod.metadata.labels["name"],
         }
 
@@ -511,9 +529,9 @@ def create_challenge_network_policies(teamname: str, challengename: str) -> None
         deny_policy = create_network_policy_deny_all_task(teamname, challengename)
         net_api.create_namespaced_network_policy(namespace=teamname, body=deny_policy)
 
-        networklist = dboperator.get_unique_networks(challengename)
+        networklist = get_unique_networks(challengename)
         for netname in networklist:  # understand all networks that will need to be created
-            temp_network_pods = dboperator.get_pods_in_network(challengename, netname)
+            temp_network_pods = get_pods_in_network(challengename, netname)
             network_pods = [x for x in temp_network_pods]  # make a copy
 
             if netname == "teamnet":  # if it is teamnet, include the vpn pod in whitelist
@@ -693,14 +711,14 @@ def create_team_vpn_configmap(teamname) -> None:
         core_api = CoreV1Api()
         teamCertDir = CERT_DIR_CONTAINER + teamname
 
-        ovpn_config = certmanager.get_server_ovpn_config(teamCertDir)
-        server_key = certmanager.get_server_key(teamCertDir)
-        server_cert = certmanager.get_server_cert(teamCertDir)
-        server_ca = certmanager.get_server_ca(teamCertDir)
-        server_ta = certmanager.get_server_ta(teamCertDir)
-        ovpn_env = certmanager.get_openvpn_env(teamCertDir)
-        up_script = certmanager.get_up_script(teamCertDir)
-        down_script = certmanager.get_down_script(teamCertDir)
+        ovpn_config = get_server_ovpn_config(teamCertDir)
+        server_key = get_server_key(teamCertDir)
+        server_cert = get_server_cert(teamCertDir)
+        server_ca = get_server_ca(teamCertDir)
+        server_ta = get_server_ta(teamCertDir)
+        ovpn_env = get_openvpn_env(teamCertDir)
+        up_script = get_up_script(teamCertDir)
+        down_script = get_down_script(teamCertDir)
 
         config_map = V1ConfigMap(
             api_version="v1",
@@ -859,14 +877,14 @@ def expose_team_vpn_container(teamname: str, externalport: int) -> None:
 
 def register_user_ovpn(teamname: str, username: str) -> str:
     vpnDirLocation = CERT_DIR_CONTAINER + teamname
-    result = certmanager.generate_user(teamname, username, vpnDirLocation)
-    dboperator.insert_user_vpn_config(teamname, username, result)
+    result = generate_user(teamname, username, vpnDirLocation)
+    insert_user_vpn_config(teamname, username, result)
     return "successfully registered"
 
 
 def obtain_user_ovpn_config(teamname: str, username: str) -> str:
     vpnDirLocation = CERT_DIR_CONTAINER + teamname
-    result = certmanager.get_user(teamname, username, vpnDirLocation)
+    result = get_user(teamname, username, vpnDirLocation)
     result = str(result).replace("\\n", "\n")
     return result
 
@@ -921,7 +939,7 @@ def delete_namespace(teamname: str, timeout: int = 300, interval: int = 5) -> in
         raise e
 
 
-async def k8s_watcher(event_manager: events.RedisEventManager) -> None:
+async def k8s_watcher(event_manager: RedisEventManager) -> None:
     ensure_kube_config_loaded()
     core_api = CoreV1Api()
     w = watch.Watch()
@@ -945,7 +963,7 @@ async def k8s_watcher(event_manager: events.RedisEventManager) -> None:
 
             if "name" in pod_labels:
                 try:
-                    challenge_name = dboperator.get_challenge_from_k8s_name(pod_labels.get("name", ""))
+                    challenge_name = get_challenge_from_k8s_name(pod_labels.get("name", ""))
                 except Exception:
                     pass
 

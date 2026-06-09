@@ -48,4 +48,4 @@ COPY ahaz_common ahaz_common/
 RUN uv sync --all-packages
 
 # Run the server
-CMD ["/bin/uv", "run", "/app/ahaz_k8s_controller/k8s_controller/server.py"]
+CMD ["/bin/uv", "run", "server"]

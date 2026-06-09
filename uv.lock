@@ -70,7 +70,7 @@ requires-dist = [
 [[package]]
 name = "ahaz-k8s-controller"
 version = "1.0.0"
-source = { virtual = "ahaz_k8s_controller" }
+source = { editable = "ahaz_k8s_controller" }
 dependencies = [
     { name = "ahaz-common" },
     { name = "asyncio" },
