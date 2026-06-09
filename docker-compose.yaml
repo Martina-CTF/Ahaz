@@ -50,7 +50,7 @@ services:
     image: valkey/valkey:9.1.0-alpine
     restart: always
     volumes:
-      - ./ahaz_data/valkey:/data
+      - ./data/valkey:/data
     healthcheck:
       test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
       interval: 30s

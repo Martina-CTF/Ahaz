@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 server = "k8s_controller.server:main"
+worker = "k8s_controller.work.worker:main"
 
 [tool.uv.sources]
 ahaz_common = { workspace = true }

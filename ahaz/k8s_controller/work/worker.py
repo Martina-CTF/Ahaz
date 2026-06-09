@@ -163,7 +163,7 @@ async def _recovery_loop(r: aioredis.Redis) -> None:  # pyright: ignore[reportUn
         await asyncio.sleep(5)  # Check every 5 seconds
 
 
-if __name__ == "__main__":
+def main():
     worker_id = str(uuid.uuid4())
     redis_client = aioredis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=None)
     loop = asyncio.new_event_loop()

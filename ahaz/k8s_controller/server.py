@@ -255,10 +255,10 @@ async def worker_service(worker_count: int):
         for p in processes:
             if p["process"] is not None:
                 continue
-            process_args = [os.path.join(os.path.dirname(__file__), "work/worker.py")]
+            process_args = ["run", "worker", "--"]
             if p["type"] == "recovery":
                 process_args.append("recovery")
-            process = await asyncio.create_subprocess_exec(sys.executable, *process_args, env=os.environ)
+            process = await asyncio.create_subprocess_exec("/bin/uv", *process_args, env=os.environ)
             p["process"] = process
 
         # Wait on any child process to exit
@@ -277,7 +277,7 @@ async def worker_service(worker_count: int):
                 p["process"] = None
 
 
-if __name__ == "__main__":
+def main():
     Thread(
         target=asyncio.new_event_loop().run_until_complete,
         args=(worker_service(int(os.getenv("WORKER_COUNT", 4))),),
@@ -291,4 +291,4 @@ if __name__ == "__main__":
         daemon=True,
     ).start()
 
-    uvicorn.run("server:app", host="0.0.0.0", port=5000, workers=4)
+    uvicorn.run("k8s_controller.server:app", host="0.0.0.0", port=5000, workers=4)
