@@ -33,8 +33,8 @@ from .db.operator import (
     get_registration_progress_team,
     get_registration_progress_team_any,
     list_challenges,
-    push_task_definition,
     set_registration_progress_team,
+    set_task_definition,
 )
 from .events import RedisEventManager
 
@@ -74,7 +74,7 @@ async def create_task():
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
 
-    await push_task_definition(request_data)
+    await set_task_definition(request_data)
     return "Task created successfully", 201
 
 
