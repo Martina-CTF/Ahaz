@@ -1,6 +1,4 @@
-import certmanager
-import controller
-import dboperator
+from .. import certmanager, controller, dboperator
 
 
 def gen_cert(team_id: str, port: int, public_domainname: str, certdir: str):

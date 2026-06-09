@@ -4,7 +4,6 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, NotRequired, TypedDict
 
 import redis.asyncio as aioredis
 
@@ -15,19 +14,43 @@ WORK_QUEUE = os.getenv("WORK_QUEUE_KEY", "work:runnable")
 logger = logging.getLogger()
 
 
-class Work(TypedDict):
-    payload: dict[str, Any]
-    deps: list[str]
-    idempotent_on: NotRequired[dict | None]
-
-
-class DoableWork(TypedDict):
+class Work:
     id: str
     type: str
-    payload: dict[str, Any]
+    payload: dict
+    deps: list[str]
+    idempotent_on: dict | None
+
+    def __init__(
+        self,
+        id: str,
+        type: str,
+        payload: dict,
+        deps: list[str] | None = None,
+        idempotent_on: dict | None = None,
+    ):
+        self.id = id
+        self.type = type
+        self.payload = payload
+        self.deps = deps or []
+        self.idempotent_on = idempotent_on
 
 
-def _has_circular_dependencies(tasks: dict[str, Work]) -> bool:
+# Subset of Work that should not be created outside of this module
+class DoableWork:
+    id: str
+    type: str
+    payload: dict
+
+    def __init__(self, id: str, type: str, payload: dict):
+        self.id = id
+        self.type = type
+        self.payload = payload
+
+
+def _has_circular_dependencies(tasks: list[Work]) -> bool:
+    task_dict = {task.id: task for task in tasks}
+
     # Simple DFS to detect cycles in the dependency graph
     visited = set()
     rec_stack = set()
@@ -41,7 +64,7 @@ def _has_circular_dependencies(tasks: dict[str, Work]) -> bool:
         visited.add(node)
         rec_stack.add(node)
 
-        deps = tasks[node]["deps"]
+        deps = task_dict[node].deps
         if deps is not None:
             for dep in deps:
                 if visit(dep):
@@ -50,8 +73,8 @@ def _has_circular_dependencies(tasks: dict[str, Work]) -> bool:
         rec_stack.remove(node)
         return False
 
-    for task_name in tasks.keys():
-        if visit(task_name):
+    for task in tasks:
+        if visit(task.id):
             return True
 
     return False
@@ -63,103 +86,133 @@ def _make_idempotency_key(task_type: str, payload: dict) -> str:
     return f"idempotency:{task_type}:{digest}"
 
 
+def _remap_ids(tasks: list[Work], id_map: dict[str, str]) -> list[Work]:
+    for task in tasks:
+        if task.id not in id_map:
+            continue
+        task.id = id_map[task.id]
+        task.deps = [id_map[dep] for dep in task.deps]
+    return tasks
+
+
 class WorkQueue:
     def __init__(self, redis_client: aioredis.Redis):
         self.redis_client = redis_client
 
-    async def enqueue_many(self, tasks: dict[str, Work]) -> list[str]:  # noqa: C901 -- Not that complex tbh
-        # Check for unmeetable dependencies (dependencies that reference task names that don't exist)
-        for name, work in tasks.items():
-            for dep in work["deps"]:
-                if dep not in tasks:
-                    raise ValueError(f"Task {name} has unmeetable dependency: {dep}")
+    async def idempotency(self, idempotency_key: str, task_id: str) -> str:
+        inserted = await self.redis_client.setnx(idempotency_key, task_id)
+
+        if inserted:
+            return task_id
+
+        existing_id = await self.redis_client.get(idempotency_key)
+
+        if existing_id is None:
+            raise Exception("Unexpected missing idempotency key after setnx")
+
+        return existing_id.decode() if isinstance(existing_id, bytes) else existing_id
+
+    async def enqueue_many(self, tasks: list[Work]) -> list[str]:  # noqa: C901 -- Not that complex tbh
+        # Check for unmeetable depenencies (i.e. reference task names that don't exist)
+        task_ids = {task.id for task in tasks}
+        for task in tasks:
+            for dep in task.deps:
+                if dep not in task_ids:
+                    raise Exception(f"Task {task.id} has unmeetable dependency: {dep}")
 
         # Check for circular dependencies
         if _has_circular_dependencies(tasks):
-            raise ValueError("Tasks have circular dependencies")
+            raise Exception("Tasks have circular dependencies")
 
-        # Generate UUIDs for all tasks first, so we can reference them when setting up dependencies
-        task_ids = {name: f"{name}-{uuid.uuid4()}" for name in tasks.keys()}
+        # Remap IDs by generating UUIDs
+        uuid_map = {task.id: f"{task.id}-{uuid.uuid4()}" for task in tasks}
+        tasks = _remap_ids(tasks, uuid_map)
 
-        # Check for idempotency key collisions before enqueuing any tasks
-        for name, work in tasks.items():
-            idempotent_on = work.get("idempotent_on")
-            if idempotent_on is not None:
-                idempotency_key = _make_idempotency_key(name, idempotent_on)
-                existing_id = await self.idempotency(idempotency_key, task_ids[name])
-                if existing_id is not None:
-                    # Use existing task ID if a task with the same idempotency key already exists
-                    task_ids[name] = existing_id
+        # Remap IDs by idempotency keys
+        idempotent_tasks = {task.id: task.id for task in tasks}  # original -> new ID
+        for task in tasks:
+            if task.idempotent_on is not None:
+                idempotency_key = _make_idempotency_key(task.type, task.idempotent_on)
+                existing_id = await self.idempotency(idempotency_key, task.id)
+                if existing_id != task.id:
+                    idempotent_tasks[task.id] = existing_id
 
-        # Normalize tasks to use new IDs
-        normalized_tasks = {
-            task_ids[name]: Work(
-                payload=work["payload"],
-                deps=[task_ids[dep] for dep in work["deps"]],
-                idempotent_on=work.get("idempotent_on"),
-            )
-            for name, work in tasks.items()
-        }
+        tasks = _remap_ids(tasks, idempotent_tasks)
 
-        # Note that this could be done with a pipe, but it is
-        # not necessary to be atomic if we do it in the right order
+        # Remove tasks that already have been queued
+        tasks = [task for task in tasks if task.idempotent_on is None or idempotent_tasks[task.id] == task.id]
 
-        id_list = []
+        while True:
+            try:
+                # Atomic on all idempotent tasks, to avoid race conditions
+                async with self.redis_client.pipeline() as pipe:
+                    for id in idempotent_tasks.values():
+                        await pipe.watch(f"task:{id}")  # Watch the tasks that are already in the queue
 
-        # Make sure to insert tasks with dependencies first
-        for task_id, work in normalized_tasks.items():
-            if len(work["deps"]) > 0:
-                id = await self.enqueue(work, task_id)
-                id_list.append(id)
+                    # Remove finished idempotent tasks from dependencies
+                    finished_tasks = set()
+                    for id in idempotent_tasks.values():
+                        state = await self.redis_client.hget(f"task:{id}", "state")
+                        if state is None:
+                            raise Exception(f"Unexpected missing task for idempotency key: {id}")
 
-        # Now insert tasks without dependencies
-        for task_id, work in normalized_tasks.items():
-            if len(work["deps"]) == 0:
-                id = await self.enqueue(work, task_id)
-                id_list.append(id)
+                        if isinstance(state, bytes):
+                            state = state.decode()
 
-        return id_list
+                        if state == "done":
+                            finished_tasks.add(id)
 
-    async def idempotency(self, idempotency_key: str, task_id: str) -> str | None:
-        await self.redis_client.setnx(idempotency_key, task_id)
-        id = await self.redis_client.get(idempotency_key)
+                    for task in tasks:
+                        task.deps = [dep for dep in task.deps if dep not in finished_tasks]
 
-        if id is None:
-            raise Exception("idempotency key was just set but now cannot be found??")
+                    # Enqueue tasks
+                    async with self.redis_client.pipeline() as pipe:
+                        pipe.multi()
+                        for task in tasks:
+                            await pipe.hset(
+                                f"task:{task.id}",
+                                mapping={
+                                    "state": "pending",
+                                    "payload": json.dumps({"type": task.type, **task.payload}),
+                                    "deps_remaining": len(task.deps),
+                                    "attempts": 0,
+                                    "max_attempts": MAX_ATTEMPTS,
+                                    "lease_until": 0,
+                                    "worker": "",
+                                },
+                            )
 
-        if isinstance(id, bytes):
-            id = id.decode()
+                            # Reverse dependency graph
+                            for dep in task.deps:
+                                # This function is sad :(
+                                await pipe.sadd(f"task:children:{dep}", task.id)
 
-        if id != task_id:
-            return id
+                            # Immediately runnable
+                            if not task.deps:
+                                await pipe.rpush(WORK_QUEUE, task.id)
 
-        return None
+                        await pipe.execute()
 
-    async def enqueue(self, work: Work, id: str | None = None) -> str:
-        idempotent_on = work.get("idempotent_on")
-        payload = work["payload"]
-        deps = work["deps"]
+                        return [task.id for task in tasks] + [x for x in finished_tasks]
+            except aioredis.WatchError:
+                # Atomic failed because something else modified one of the watched keys, retry
+                continue
 
-        idempotency_key = None
-        if idempotent_on is not None:
-            idempotency_key = _make_idempotency_key(payload["type"], idempotent_on)
+    async def enqueue(self, task: Work) -> str:
+        task.id = f"{task.id}-{uuid.uuid4()}"  # Remap ID by generating a UUID
 
-        task_id = str(uuid.uuid4()) if id is None else id
-
-        if idempotency_key is not None:
-            existing_id = await self.idempotency(idempotency_key, id or "")
-            if existing_id is not None:
+        if task.idempotent_on is not None:
+            idempotency_key = _make_idempotency_key(task.type, task.idempotent_on)
+            existing_id = await self.idempotency(idempotency_key, task.id)
+            if existing_id != task.id:
                 return existing_id
 
-        deps = deps or []
-
         await self.redis_client.hset(
-            f"task:{task_id}",
+            f"task:{task.id}",
             mapping={
                 "state": "pending",
-                "payload": json.dumps(payload),
-                "deps_remaining": len(deps),
-                "idempotency_key": idempotency_key or "",
+                "payload": json.dumps({"type": task.type, **task.payload}),
+                "deps_remaining": len(task.deps),
                 "attempts": 0,
                 "max_attempts": MAX_ATTEMPTS,
                 "lease_until": 0,
@@ -168,14 +221,15 @@ class WorkQueue:
         )
 
         # Reverse dependency graph
-        for dep in deps:
-            await self.redis_client.sadd(f"task:children:{dep}", task_id)
+        for dep in task.deps:
+            # This function is sad :(
+            await self.redis_client.sadd(f"task:children:{dep}", task.id)
 
         # Immediately runnable
-        if not deps:
-            await self.redis_client.rpush(WORK_QUEUE, task_id)
+        if not task.deps:
+            await self.redis_client.rpush(WORK_QUEUE, task.id)
 
-        return task_id
+        return task.id
 
     async def claim(self, task_id: str, worker_id: str) -> bool:
         key = f"task:{task_id}"
@@ -254,7 +308,7 @@ class WorkQueue:
                 payload = json.loads(payload)
                 if not isinstance(payload, dict) or "type" not in payload:
                     raise Exception("Invalid payload format")
-                return {"type": payload.pop("type"), "id": task_id, "payload": payload}
+                return DoableWork(id=task_id, type=payload.pop("type"), payload=payload)
             except Exception as e:
                 logger.error(f"{worker_id}: invalid {task_id}")
                 logger.debug(f"Error parsing payload for task {task_id}: {e}")
@@ -285,9 +339,7 @@ class WorkQueue:
                             break
 
                         deps_remaining = int(task["deps_remaining"])
-
                         state = task["state"]
-
                         new_count = deps_remaining - 1
 
                         pipe.multi()  # Atomic from here on

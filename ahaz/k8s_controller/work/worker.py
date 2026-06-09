@@ -13,8 +13,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 import redis.asyncio as aioredis
-from work import tasks
-from work.queue import WORK_QUEUE, WorkQueue
+
+from . import tasks
+from .queue import WORK_QUEUE, WorkQueue
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
@@ -63,7 +64,7 @@ async def _worker_loop(worker_id: str, r: aioredis.Redis) -> None:
         work = await queue.wait(worker_id)
 
         try:
-            logger.debug(f"{worker_id}: doing {work['type']}")
+            logger.debug(f"{worker_id}: doing {work.type}")
             await r.publish(
                 "ahaz_events",
                 json.dumps(
@@ -71,13 +72,13 @@ async def _worker_loop(worker_id: str, r: aioredis.Redis) -> None:
                         "type": "work",
                         "data": {
                             "state": "started",
-                            "id": work["id"],
-                            "type": work["type"],
+                            "id": work.id,
+                            "type": work.type,
                         },
                     }
                 ),
             )
-            await do_work(work["type"], work["payload"])
+            await do_work(work.type, work.payload)
             await r.publish(
                 "ahaz_events",
                 json.dumps(
@@ -85,20 +86,20 @@ async def _worker_loop(worker_id: str, r: aioredis.Redis) -> None:
                         "type": "work",
                         "data": {
                             "state": "finished",
-                            "id": work["id"],
-                            "type": work["type"],
+                            "id": work.id,
+                            "type": work.type,
                         },
                     }
                 ),
             )
-            logger.debug(f"{worker_id}: done {work['type']}")
-            await queue.mark_complete(work["id"])
+            logger.debug(f"{worker_id}: done {work.type}")
+            await queue.mark_complete(work.id)
 
         except Exception:
-            logger.error(f"{worker_id}: fail {work['type']}")
-            logger.debug(f"Error processing task {work['id']}:")
+            logger.error(f"{worker_id}: fail {work.type}")
+            logger.debug(f"Error processing task {work.id}:")
             traceback.print_exc()
-            await queue.mark_failed(work["id"])
+            await queue.mark_failed(work.id)
 
 
 # Requeues abandoned tasks whose leases have expired. Should be run seperately as a singleton.

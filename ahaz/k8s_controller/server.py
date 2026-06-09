@@ -26,7 +26,7 @@ from .dboperator import (
     get_challenges_from_db,
     get_user_vpn_config,
 )
-from .work.queue import WorkQueue
+from .work.queue import Work, WorkQueue
 
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
@@ -139,71 +139,59 @@ async def autogenerate():
         port = TEAM_PORT_RANGE_START
 
     await work_queue.enqueue_many(
-        {
-            "gen_cert": {
-                "payload": {
-                    "type": "gen_cert",
+        [
+            Work(
+                id="gen_cert",
+                type="gen_cert",
+                payload={
                     "team_id": request_data.team_id,
                     "port": port,
                     "public_domainname": PUBLIC_DOMAINNAME,
                     "certdir": CERT_DIR_CONTAINER,
                 },
-                "idempotent_on": {"team_id": request_data.team_id},
-                "deps": [],
-            },
-            "create_namespace": {
-                "payload": {
-                    "type": "create_namespace",
-                    "team_id": request_data.team_id,
-                },
-                "idempotent_on": {"team_id": request_data.team_id},
-                "deps": [],
-            },
-            "create_vpn_container": {
-                "payload": {
-                    "type": "create_vpn_container",
-                    "team_id": request_data.team_id,
-                },
-                "idempotent_on": {"team_id": request_data.team_id},
-                "deps": ["gen_cert", "create_namespace"],
-            },
-            "expose_vpn_container": {
-                "payload": {
-                    "type": "expose_vpn_container",
-                    "team_id": request_data.team_id,
-                    "port": port,
-                },
-                "idempotent_on": {"team_id": request_data.team_id},
-                "deps": ["create_vpn_container"],
-            },
-            "insert_db": {
-                "payload": {
-                    "type": "insert_db",
-                    "team_id": request_data.team_id,
-                    "port": port,
-                },
-                "idempotent_on": {"team_id": request_data.team_id},
-                "deps": [],
-            },
-            "register_user": {
-                "payload": {
-                    "type": "register_user",
-                    "team_id": request_data.team_id,
-                    "user_id": request_data.user_id,
-                },
-                "idempotent_on": {"team_id": request_data.team_id, "user_id": request_data.user_id},
-                "deps": ["gen_cert"],
-            },
-            "insert_user_db": {
-                "payload": {
-                    "type": "insert_user_db",
-                    "team_id": request_data.team_id,
-                    "user_id": request_data.user_id,
-                },
-                "idempotent_on": {"team_id": request_data.team_id, "user_id": request_data.user_id},
-                "deps": ["register_user"],
-            },
-        },
+                idempotent_on={"team_id": request_data.team_id},
+            ),
+            Work(
+                id="create_namespace",
+                type="create_namespace",
+                payload={"team_id": request_data.team_id},
+                idempotent_on={"team_id": request_data.team_id},
+            ),
+            Work(
+                id="create_vpn_container",
+                type="create_vpn_container",
+                payload={"team_id": request_data.team_id},
+                idempotent_on={"team_id": request_data.team_id},
+                deps=["gen_cert", "create_namespace"],
+            ),
+            Work(
+                id="expose_vpn_container",
+                type="expose_vpn_container",
+                payload={"team_id": request_data.team_id, "port": port},
+                idempotent_on={"team_id": request_data.team_id},
+                deps=["create_vpn_container"],
+            ),
+            Work(
+                id="insert_db",
+                type="insert_db",
+                payload={"team_id": request_data.team_id, "port": port},
+                idempotent_on={"team_id": request_data.team_id},
+            ),
+            Work(
+                id="register_user",
+                type="register_user",
+                payload={"team_id": request_data.team_id, "user_id": request_data.user_id},
+                idempotent_on={"team_id": request_data.team_id, "user_id": request_data.user_id},
+                deps=["gen_cert"],
+            ),
+            Work(
+                id="insert_user_db",
+                type="insert_user_db",
+                payload={"team_id": request_data.team_id, "user_id": request_data.user_id},
+                idempotent_on={"team_id": request_data.team_id, "user_id": request_data.user_id},
+                deps=["register_user"],
+            ),
+        ]
     )
 
     return "enqueued"
