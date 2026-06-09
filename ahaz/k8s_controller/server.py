@@ -244,8 +244,6 @@ async def events():
 
 
 async def worker_service(worker_count: int):
-    import sys
-
     processes = [{"type": "recovery", "process": None}] + [
         {"type": "worker", "process": None} for _ in range(worker_count)
     ]
