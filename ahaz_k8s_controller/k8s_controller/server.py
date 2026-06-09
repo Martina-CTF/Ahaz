@@ -450,4 +450,4 @@ def main():
         daemon=True,
     ).start()
 
-    uvicorn.run("server:app", host="0.0.0.0", port=5000, workers=4)
+    uvicorn.run("k8s_controller.server:app", host="0.0.0.0", port=5000, workers=4)
