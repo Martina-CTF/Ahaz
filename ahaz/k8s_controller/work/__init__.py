@@ -137,10 +137,13 @@ class WorkQueue:
                 if existing_id != task.id:
                     idempotent_tasks[task.id] = existing_id
 
-        tasks = _remap_ids(tasks, idempotent_tasks)
+        # Determine which tasks we actually need to create (filter BEFORE remapping IDs)
+        tasks_to_create = [
+            task for task in tasks if task.idempotent_on is None or idempotent_tasks[task.id] == task.id
+        ]
 
-        # Remove tasks that already have been queued
-        tasks = [task for task in tasks if task.idempotent_on is None or idempotent_tasks[task.id] == task.id]
+        # Apply remapping (some tasks may be remapped to existing IDs)
+        tasks = _remap_ids(tasks_to_create, idempotent_tasks)
 
         while True:
             try:
@@ -154,7 +157,7 @@ class WorkQueue:
                     for id in idempotent_tasks.values():
                         state = await self.redis_client.hget(f"task:{id}", "state")
                         if state is None:
-                            raise Exception(f"Unexpected missing task for idempotency key: {id}")
+                            continue  # Task doesn't exist, will be created in this batch
 
                         if isinstance(state, bytes):
                             state = state.decode()

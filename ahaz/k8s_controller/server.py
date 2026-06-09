@@ -138,7 +138,7 @@ async def autogenerate():
         logger.error(e)
         port = TEAM_PORT_RANGE_START
 
-    await work_queue.enqueue_many(
+    enqueued_ids = await work_queue.enqueue_many(
         [
             Work(
                 id="gen_cert",
@@ -194,7 +194,7 @@ async def autogenerate():
         ]
     )
 
-    return "enqueued"
+    return json.dumps({"status": "enqueued", "tasks": [id for id in enqueued_ids]}), 200
 
 
 @app.route("/events", methods=["GET"])
