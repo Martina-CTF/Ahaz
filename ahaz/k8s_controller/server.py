@@ -26,7 +26,7 @@ from .dboperator import (
     get_challenges_from_db,
     get_user_vpn_config,
 )
-from .work.queue import Work, WorkQueue
+from .work import Work, WorkQueue
 
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")

@@ -14,8 +14,7 @@ from typing import Any
 
 import redis.asyncio as aioredis
 
-from . import tasks
-from .queue import WORK_QUEUE, WorkQueue
+from . import WORK_QUEUE, WorkQueue, tasks
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
