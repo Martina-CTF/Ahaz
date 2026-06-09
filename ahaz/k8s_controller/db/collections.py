@@ -18,6 +18,9 @@ DB_DBNAME = getenv("DB_DBNAME", "ahaz")
 DB_USERNAME = getenv("DB_USERNAME", "dbeaver")
 DB_PASSWORD = getenv("DB_PASSWORD", "dbeaver")
 
+# Shut up MongoDB driver logging
+logging.getLogger("pymongo").setLevel(logging.WARNING)
+
 logger = logging.getLogger()
 
 

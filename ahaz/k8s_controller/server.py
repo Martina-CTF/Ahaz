@@ -187,7 +187,7 @@ async def getuser():
 async def gen_team_from_flask_for_subprocess(request_data: RegisterTeamRequest) -> str:
     try:
         logger.debug("doing except")
-        gen_team(
+        await gen_team(
             request_data.team_id,
             request_data.domain_name,
             request_data.port,
@@ -196,7 +196,7 @@ async def gen_team_from_flask_for_subprocess(request_data: RegisterTeamRequest) 
         )
         create_team_namespace(request_data.team_id)
         logger.debug("=8")
-        create_team_vpn_container(request_data.team_id)
+        await create_team_vpn_container(request_data.team_id)
         logger.debug("about to expose team vpn container")
         expose_team_vpn_container(request_data.team_id, request_data.port)
         # logger.debug("=9")
@@ -257,7 +257,13 @@ async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:  #
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 1)
             logger.debug("started registration proces for a team")
 
-            gen_team(request_data.team_id, PUBLIC_DOMAINNAME, port, "tcp", CERT_DIR_CONTAINER)
+            await gen_team(
+                request_data.team_id,
+                f"server.{request_data.team_id}.{PUBLIC_DOMAINNAME}",
+                port,
+                "tcp",
+                CERT_DIR_CONTAINER,
+            )
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 2)
             logger.debug(f"generated certificates for team {request_data.team_id}")
 
@@ -265,7 +271,7 @@ async def autogenerate_subprocess(request_data: UserRequest, port=-1) -> str:  #
             logger.debug(f"created namespace for team {request_data.team_id}")
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 3)
-            create_team_vpn_container(request_data.team_id)
+            await create_team_vpn_container(request_data.team_id)
             logger.debug(f"created VPN Container for team {request_data.team_id}")
 
             await set_registration_progress_threaded(request_data.team_id, request_data.user_id, 4)

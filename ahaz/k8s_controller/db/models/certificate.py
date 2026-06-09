@@ -4,7 +4,8 @@ from pydantic import BaseModel, field_validator
 
 
 class CertificateDoc(TypedDict):
-    serial_number: int
+    # A serial number is 20 bytes, too big to be stored as an int in MongoDB :<
+    serial_number: str
     common_name: str
     cert: str
     private_key: str
@@ -19,6 +20,6 @@ class Certificate(BaseModel):
     @field_validator("cert", "private_key")
     @classmethod
     def validate_pem(cls, v: str) -> str:
-        if not v.startswith("-----BEGIN") or not v.endswith("-----"):
+        if not v.startswith("-----BEGIN") or not v.strip().endswith("-----"):
             raise ValueError("Invalid PEM format")
         return v

@@ -4,10 +4,9 @@ from os import getenv
 from ahaz_common.task import Task
 
 from .collections import get_context
+from .models.certificate import Certificate, CertificateDoc
 from .models.task import TaskDefinitionDoc, task_to_task_doc
 from .models.team import Team, TeamDoc
-
-from ahaz_k8s_controller.k8s_controller.db.models.certificate import Certificate, CertificateDoc
 
 K8S_IP_RANGE = getenv("K8S_IP_RANGE", "10.42.0.0 255.255.0.0")
 
@@ -70,7 +69,7 @@ async def set_certificate(cert: Certificate) -> None:
     database = await get_context()
 
     cert_doc = CertificateDoc(
-        serial_number=cert.serial_number,
+        serial_number=str(cert.serial_number),
         common_name=cert.common_name,
         cert=cert.cert,
         private_key=cert.private_key,
@@ -108,6 +107,13 @@ async def get_certificate_by_common_name(common_name: str) -> Certificate:
         raise ValueError("certificate not found in db")
 
     return Certificate.model_validate(cert_doc)
+
+
+async def get_only_certificate_by_common_name(common_name: str) -> str:
+    # TODO: maybe leverage mongodb aggregation to pull only the cert field instead of the whole document, idk
+    certificate = await get_certificate_by_common_name(common_name)
+
+    return certificate.cert
 
 
 # TODO: dumbass zone, remove when possible

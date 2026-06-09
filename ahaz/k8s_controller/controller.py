@@ -60,7 +60,11 @@ from .certmanager import (
     get_up_script,
     get_user,
 )
-from .db.operator import get_task_definition
+from .db.operator import (
+    get_certificate_by_common_name,
+    get_only_certificate_by_common_name,
+    get_task_definition,
+)
 from .events import RedisEventManager
 
 # This file has `#type: ignore` comments to ignore type checking errors from the kubernetes client library,
@@ -673,16 +677,15 @@ def create_team_namespace(teamname: str) -> None:
 
 
 @retry(**retry_opts)
-def create_team_vpn_configmap(teamname) -> None:
+async def create_team_vpn_configmap(teamname) -> None:
     ensure_kube_config_loaded()
     try:
         core_api = CoreV1Api()
         teamCertDir = CERT_DIR_CONTAINER + teamname
 
         ovpn_config = get_server_ovpn_config(teamCertDir)
-        server_key = get_server_key(teamCertDir)
-        server_cert = get_server_cert(teamCertDir)
-        server_ca = get_server_ca(teamCertDir)
+        server_cert = await get_certificate_by_common_name(f"server.{teamname}.{PUBLIC_DOMAINNAME}")
+        ca = await get_only_certificate_by_common_name(f"ca.{teamname}.{PUBLIC_DOMAINNAME}")
         server_ta = get_server_ta(teamCertDir)
         ovpn_env = get_openvpn_env(teamCertDir)
         up_script = get_up_script(teamCertDir)
@@ -694,9 +697,9 @@ def create_team_vpn_configmap(teamname) -> None:
             metadata=V1ObjectMeta(name=f"vpn-config-{teamname}"),
             data={
                 "ovpn.conf": ovpn_config,
-                "server.key": server_key,
-                "server.crt": server_cert,
-                "ca.crt": server_ca,
+                "server.key": server_cert.private_key,
+                "server.crt": server_cert.cert,
+                "ca.crt": ca,
                 "ta.key": server_ta,
                 "ovpn.env": ovpn_env,
                 "up.sh": up_script,
@@ -713,10 +716,10 @@ def create_team_vpn_configmap(teamname) -> None:
 
 
 @retry(**retry_opts)
-def create_team_vpn_container(teamname: str) -> None:
+async def create_team_vpn_container(teamname: str) -> None:
     ensure_kube_config_loaded()
     try:
-        create_team_vpn_configmap(teamname)
+        await create_team_vpn_configmap(teamname)
         core_api = CoreV1Api()
         pod_manifest = V1Pod(
             metadata=V1ObjectMeta(
@@ -748,8 +751,8 @@ def create_team_vpn_container(teamname: str) -> None:
                             name=f"vpn-config-{teamname}",
                             items=[
                                 V1KeyToPath(key="ovpn.conf", path="openvpn.conf"),
-                                V1KeyToPath(key="server.key", path=f"pki/private/{PUBLIC_DOMAINNAME}.key"),
-                                V1KeyToPath(key="server.crt", path=f"pki/issued/{PUBLIC_DOMAINNAME}.crt"),
+                                V1KeyToPath(key="server.key", path="pki/private/server.key"),
+                                V1KeyToPath(key="server.crt", path="pki/issued/server.crt"),
                                 V1KeyToPath(key="ca.crt", path="pki/ca.crt"),
                                 V1KeyToPath(key="ta.key", path="pki/ta.key"),
                                 V1KeyToPath(key="ovpn.env", path="ovpn_env.sh"),
