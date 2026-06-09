@@ -17,8 +17,8 @@ ARG EASYRSA_VERSION=3.1.0
 ARG EASYRSA_NAME=EasyRSA-${EASYRSA_VERSION}.tgz
 ARG EASYRSA_URL=https://github.com/OpenVPN/easy-rsa/releases/download/v${EASYRSA_VERSION}/${EASYRSA_NAME}
 
-ADD --unpack=true ${EASYRSA_URL} /app/ahaz_k8s_controller/k8s_controller/tools/
-RUN ln -sf /app/ahaz_k8s_controller/k8s_controller/tools/EasyRSA-${EASYRSA_VERSION}/easyrsa /usr/local/bin/easyrsa
+ADD --unpack=true ${EASYRSA_URL} /app/ahaz/k8s_controller/tools/
+RUN ln -sf /app/ahaz/k8s_controller/tools/EasyRSA-${EASYRSA_VERSION}/easyrsa /usr/local/bin/easyrsa
 RUN chmod +x /usr/local/bin/easyrsa
 
 # Install Python and OpenVPN
@@ -34,8 +34,8 @@ ENV KUBECONFIG=/.kube/config.yml
 
 # Copy over project info to set up uv environment
 WORKDIR /app
-COPY ahaz_k8s_controller/pyproject.toml ahaz_k8s_controller/pyproject.toml
-COPY ahaz_common/pyproject.toml ahaz_common/pyproject.toml
+COPY ahaz/pyproject.toml ahaz/pyproject.toml
+COPY common/pyproject.toml common/pyproject.toml
 COPY pyproject.toml pyproject.toml
 COPY uv.lock uv.lock
 
@@ -43,8 +43,8 @@ COPY uv.lock uv.lock
 RUN uv sync --all-packages
 
 # Copy over the rest of the project files
-COPY ahaz_k8s_controller ahaz_k8s_controller/
-COPY ahaz_common ahaz_common/
+COPY ahaz ahaz/
+COPY common common/
 
 RUN uv sync --all-packages
 
@@ -52,4 +52,4 @@ RUN uv sync --all-packages
 ENTRYPOINT ["/sbin/tini", "--"]
 
 # Run the server
-CMD ["/bin/uv", "run", "/app/ahaz_k8s_controller/k8s_controller/server.py"]
+CMD ["/bin/uv", "run", "server"]

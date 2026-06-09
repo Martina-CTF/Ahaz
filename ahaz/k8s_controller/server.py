@@ -4,13 +4,10 @@ import logging
 import os
 from threading import Thread
 
-import controller
-import dboperator
 import redis.asyncio as aioredis
 import uvicorn
 from pydantic import ValidationError
 from quart import Quart, make_response, request
-from work.queue import WorkQueue
 
 from ahaz_common import (
     ChallengeRequest,
@@ -18,6 +15,18 @@ from ahaz_common import (
     TeamRequest,
     UserRequest,
 )
+
+from .controller import (
+    get_pods_namespace,
+    k8s_watcher,
+    start_challenge,
+    stop_challenge,
+)
+from .dboperator import (
+    get_challenges_from_db,
+    get_user_vpn_config,
+)
+from .work.queue import WorkQueue
 
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
@@ -48,7 +57,7 @@ def ping():
 
 
 @app.route("/start_challenge", methods=["POST", "GET"])
-async def start_challenge():
+async def start_challenge_request():
     try:
         request_data = ChallengeRequest(**await request.get_json())
     except ValidationError as e:
@@ -59,14 +68,14 @@ async def start_challenge():
         f"Received start challenge request for challenge {request_data.challenge_id}"
         + f" from {request_data.team_id}"
     )
-    status = controller.start_challenge(request_data.team_id, request_data.challenge_id)
+    status = start_challenge(request_data.team_id, request_data.challenge_id)
     if status == 0:
         status = "successfully created challenge"
     return str(status), 200
 
 
 @app.route("/stop_challenge", methods=["POST", "GET"])
-async def stop_challenge():
+async def stop_challenge_request():
     try:
         request_data = ChallengeRequest(**await request.get_json())
     except ValidationError as e:
@@ -77,18 +86,18 @@ async def stop_challenge():
         f"Received stop challenge request for challenge {request_data.challenge_id}"
         + f" from {request_data.team_id}"
     )
-    status = controller.stop_challenge(request_data.team_id, request_data.challenge_id)
+    status = stop_challenge(request_data.team_id, request_data.challenge_id)
     return status
 
 
 @app.route("/get_challenges", methods=["GET"])
 def get_challenges():
-    challenges = dboperator.get_challenges_from_db()
+    challenges = get_challenges_from_db()
     return json.dumps([{"challengename": challenge} for challenge in challenges])
 
 
 @app.route("/get_pods_namespace", methods=["GET"])
-async def get_pods_namespace():
+async def get_pods_namespace_request():
     try:
         request_data = TeamRequest(**await request.get_json())
     except ValidationError as e:
@@ -96,7 +105,7 @@ async def get_pods_namespace():
         return "Invalid request data", 400
 
     logger.info(f"Getting pods for team {request_data.team_id}")
-    podresult = controller.get_pods_namespace(str(request_data.team_id), False)
+    podresult = get_pods_namespace(str(request_data.team_id), False)
     logger.debug(f"Pods for team {request_data.team_id}:\n{podresult}")
     return podresult
 
@@ -109,7 +118,7 @@ async def getuser():
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
 
-    return dboperator.get_user_vpn_config(teamname=request_data.team_id, username=request_data.user_id)
+    return get_user_vpn_config(teamname=request_data.team_id, username=request_data.user_id)
 
 
 @app.route("/autogenerate", methods=["POST", "GET"])
@@ -290,7 +299,7 @@ if __name__ == "__main__":
     # Dedicated thread for Kubernetes watcher
     Thread(
         target=asyncio.new_event_loop().run_until_complete,
-        args=(controller.k8s_watcher(redis_client),),
+        args=(k8s_watcher(redis_client),),
         daemon=True,
     ).start()
 

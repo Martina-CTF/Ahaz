@@ -11,9 +11,10 @@ from os import getenv, listdir, makedirs, path
 from shutil import rmtree
 from typing import Any, Generator
 
-import dboperator
 import requests
 import yaml
+
+from .dboperator import get_team_port
 
 logger = logging.getLogger()
 script_dir = path.dirname(path.realpath(__file__))
@@ -555,7 +556,7 @@ def get_client_ovpn_config(
 
 
 def get_team_vpn_pod_port(team_id: str) -> int:
-    port_resp = dboperator.get_team_port(team_id)
+    port_resp = get_team_port(team_id)
     if port_resp != "null":
         return int(port_resp)
     else:
