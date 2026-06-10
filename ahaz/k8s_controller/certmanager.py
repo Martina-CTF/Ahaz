@@ -27,7 +27,7 @@ from .db.operator import (
     get_certificate_by_common_name,
     get_only_certificate_by_common_name,
     get_range,
-    set_certificate,
+    insert_certificate,
 )
 
 logger = logging.getLogger()
@@ -273,7 +273,7 @@ set_var EASYRSA_DIGEST "sha512"
             revocation_list=None,  # TODO: some beautiful day, someone beautiful will implement this
         )
 
-        await set_certificate(ca_cert)
+        await insert_certificate(ca_cert)
 
         # logger.info("Generating Diffie-Hellman (DH) parameters")
         # subprocess.run([easyrsa, "gen-dh"], **common_args)
@@ -305,7 +305,7 @@ set_var EASYRSA_DIGEST "sha512"
             valid_until=server_cert_obj.not_valid_after,
         )
 
-        await set_certificate(server_cert)
+        await insert_certificate(server_cert)
     except subprocess.CalledProcessError as e:
         logger.error(f"Command '{e.cmd}' failed with exit code {e.returncode}")
         if e.output:
@@ -662,7 +662,7 @@ async def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> st
         valid_until=client_cert_obj.not_valid_after,
     )
 
-    await set_certificate(client_cert)
+    await insert_certificate(client_cert)
 
     return await get_client_ovpn_config(
         PUBLIC_DOMAINNAME,

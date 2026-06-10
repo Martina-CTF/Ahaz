@@ -19,16 +19,12 @@ async def list_challenges() -> list[str]:
     return await database.collections.task_definitions.distinct("name")
 
 
-async def set_task_definition(task: Task) -> None:
+async def insert_task_definition(task: Task) -> None:
     database = await get_context()
 
     task_doc = task_to_task_doc(task)
 
-    await database.collections.task_definitions.update_one(
-        {"name": task_doc["name"]},
-        {"$set": task_doc},
-        upsert=True,
-    )
+    await database.collections.task_definitions.insert_one(task_doc)
 
 
 async def get_task_definition(name: str) -> Task:
@@ -65,7 +61,7 @@ async def get_range(team_id: str) -> Team:
     return Team.model_validate(team_range)
 
 
-async def set_certificate(cert: Certificate) -> None:
+async def insert_certificate(cert: Certificate) -> None:
     database = await get_context()
 
     cert_doc = cert_to_doc(cert)

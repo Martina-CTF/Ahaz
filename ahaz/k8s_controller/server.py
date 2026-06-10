@@ -33,9 +33,9 @@ from .controller import (
 from .db.operator import (
     get_registration_progress_team,
     get_registration_progress_team_any,
+    insert_task_definition,
     list_challenges,
     set_registration_progress_team,
-    set_task_definition,
 )
 from .events import RedisEventManager
 
@@ -75,7 +75,7 @@ async def create_task():
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
 
-    await set_task_definition(request_data)
+    await insert_task_definition(request_data)
     return "Task created successfully", 201
 
 

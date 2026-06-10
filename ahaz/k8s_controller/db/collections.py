@@ -57,7 +57,10 @@ async def init_indexes(collections: Collections) -> None:
     await collections.task_deployments.create_index([("team_id", 1), ("task_name", 1)], unique=True)
 
     # Task Definitions
-    await collections.task_definitions.create_index("name", unique=True)
+    # 1. Task defs should be immutable, thus, there cannot be more than one task def
+    # with the same name and version. If we want to change sth, that's a new version.
+    await collections.task_definitions.create_index([("name", 1), ("version", 1)], unique=True)
+    # TODO: improve the index to better be able to query for latest version; semver makes it a bit fucky
 
 
 async def init_db():
