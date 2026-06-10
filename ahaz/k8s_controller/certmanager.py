@@ -11,7 +11,6 @@ import os
 import re
 import subprocess
 import tarfile
-from http import server
 from os import getenv, listdir, makedirs, path
 from pathlib import Path
 from shutil import rmtree
