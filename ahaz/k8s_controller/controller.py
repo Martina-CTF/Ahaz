@@ -694,8 +694,8 @@ async def create_team_vpn_configmap(teamname) -> None:
             metadata=V1ObjectMeta(name=f"vpn-config-{teamname}"),
             data={
                 "ovpn.conf": ovpn_config,
-                "server.key": server_cert.private_key,
-                "server.crt": server_cert.cert,
+                "server.key": server_cert.get_private_key_pem(),
+                "server.crt": server_cert.get_certificate_pem(),
                 "ca.crt": ca,
                 "ta.key": server_ta,
                 "ovpn.env": ovpn_env,

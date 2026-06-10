@@ -45,8 +45,10 @@ contexts: dict[asyncio.AbstractEventLoop, MongoContext] = {}
 
 async def init_indexes(collections: Collections) -> None:
     # Certificates
+    # 1. Every single serial number MUST be unique
     await collections.certificates.create_index("serial_number", unique=True)
-    await collections.certificates.create_index("common_name", unique=False)
+    # 2. Keep the latest cert for each common name on hand.
+    await collections.certificates.create_index([("common_name", 1), ("valid_until", -1)])
 
     # Teams
     await collections.teams.create_index("team_id", unique=True)

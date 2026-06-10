@@ -19,6 +19,8 @@ from typing import Any, Generator
 import requests
 import yaml
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.types import CertificateIssuerPrivateKeyTypes
 
 from .db.models.certificate import Certificate
 from .db.operator import (
@@ -256,15 +258,19 @@ set_var EASYRSA_DIGEST "sha512"
         with open(path.join(directory, "pki/private/ca.key"), "r", encoding="utf-8") as f:
             ca_key = f.read()
 
-        # Parse the serial number from the CA certificate using cryptography
+        ca_cert_obj = x509.load_pem_x509_certificate(ca_crt.encode())
+        ca_cert_key = serialization.load_pem_private_key(ca_key.encode(), password=None)
 
-        serial_number = x509.load_pem_x509_certificate(ca_crt.encode()).serial_number
+        if not isinstance(ca_cert_key, CertificateIssuerPrivateKeyTypes):
+            raise ValueError("Invalid CA private key type")  # what the fuck is easyrsa doing if this procs
 
         ca_cert = Certificate(
-            serial_number=serial_number,
+            serial_number=ca_cert_obj.serial_number,
             common_name=ca_cn,
-            cert=ca_crt,
-            private_key=ca_key,
+            cert=ca_cert_obj,
+            private_key=ca_cert_key,
+            valid_until=ca_cert_obj.not_valid_after,
+            revocation_list=None,  # TODO: some beautiful day, someone beautiful will implement this
         )
 
         await set_certificate(ca_cert)
@@ -285,13 +291,18 @@ set_var EASYRSA_DIGEST "sha512"
         with open(path.join(directory, f"pki/private/{cn}.key"), "r", encoding="utf-8") as f:
             server_key = f.read()
 
-        serial_number = x509.load_pem_x509_certificate(server_crt.encode()).serial_number
+        server_cert_obj = x509.load_pem_x509_certificate(server_crt.encode())
+        server_cert_key = serialization.load_pem_private_key(server_key.encode(), password=None)
+
+        if not isinstance(server_cert_key, CertificateIssuerPrivateKeyTypes):
+            raise ValueError("Invalid server private key type")
 
         server_cert = Certificate(
-            serial_number=serial_number,
+            serial_number=server_cert_obj.serial_number,
             common_name=f"{cn}",
-            cert=server_crt,
-            private_key=server_key,
+            cert=server_cert_obj,
+            private_key=server_cert_key,
+            valid_until=server_cert_obj.not_valid_after,
         )
 
         await set_certificate(server_cert)
@@ -573,10 +584,14 @@ async def get_client_ovpn_config(
         config.extend(
             [
                 "\n<key>",
-                client_cert.private_key.strip(),
+                client_cert.private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.TraditionalOpenSSL,
+                    encryption_algorithm=serialization.NoEncryption(),
+                ).decode(),
                 "</key>",
                 "<cert>",
-                client_cert.cert.strip(),
+                client_cert.cert.public_bytes(serialization.Encoding.PEM).decode(),
                 "</cert>",
                 "<ca>",
                 ca_cert_pem.strip(),
@@ -633,13 +648,18 @@ async def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> st
     with open(path.join(teamVPNDirectory, f"pki/private/{cn}.key"), "r", encoding="utf-8") as f:
         client_key = f.read()
 
-    serial_number = x509.load_pem_x509_certificate(client_crt.encode()).serial_number
+    client_cert_obj = x509.load_pem_x509_certificate(client_crt.encode())
+    client_cert_key = serialization.load_pem_private_key(client_key.encode(), password=None)
+
+    if not isinstance(client_cert_key, CertificateIssuerPrivateKeyTypes):
+        raise ValueError("Invalid client private key type")
 
     client_cert = Certificate(
-        serial_number=serial_number,
+        serial_number=client_cert_obj.serial_number,
         common_name=cn,
-        cert=client_crt,
-        private_key=client_key,
+        cert=client_cert_obj,
+        private_key=client_cert_key,
+        valid_until=client_cert_obj.not_valid_after,
     )
 
     await set_certificate(client_cert)

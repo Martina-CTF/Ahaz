@@ -4,7 +4,7 @@ from os import getenv
 from ahaz_common.task import Task
 
 from .collections import get_context
-from .models.certificate import Certificate, CertificateDoc
+from .models.certificate import Certificate, CertificateDoc, cert_to_doc, doc_to_cert, extract_public_cert
 from .models.task import TaskDefinitionDoc, task_to_task_doc
 from .models.team import Team, TeamDoc
 
@@ -68,18 +68,9 @@ async def get_range(team_id: str) -> Team:
 async def set_certificate(cert: Certificate) -> None:
     database = await get_context()
 
-    cert_doc = CertificateDoc(
-        serial_number=str(cert.serial_number),
-        common_name=cert.common_name,
-        cert=cert.cert,
-        private_key=cert.private_key,
-    )
+    cert_doc = cert_to_doc(cert)
 
-    await database.collections.certificates.update_one(
-        {"serial_number": cert_doc["serial_number"]},
-        {"$set": cert_doc},
-        upsert=True,
-    )
+    await database.collections.certificates.insert_one(cert_doc)
 
 
 async def get_certificate(serial_number: int) -> Certificate:
@@ -92,7 +83,7 @@ async def get_certificate(serial_number: int) -> Certificate:
     if cert_doc is None:
         raise ValueError("certificate not found in db")
 
-    return Certificate.model_validate(cert_doc)
+    return doc_to_cert(cert_doc)
 
 
 async def get_certificate_by_common_name(common_name: str) -> Certificate:
@@ -100,20 +91,26 @@ async def get_certificate_by_common_name(common_name: str) -> Certificate:
 
     # Find newest certificate with the given common name
     cert_doc: CertificateDoc | None = await database.collections.certificates.find_one(
-        {"common_name": common_name}, sort=[("$natural", -1)]
+        {"common_name": common_name}, sort=[("valid_until", -1)]
     )
 
     if cert_doc is None:
         raise ValueError("certificate not found in db")
 
-    return Certificate.model_validate(cert_doc)
+    return doc_to_cert(cert_doc)
 
 
 async def get_only_certificate_by_common_name(common_name: str) -> str:
-    # TODO: maybe leverage mongodb aggregation to pull only the cert field instead of the whole document, idk
-    certificate = await get_certificate_by_common_name(common_name)
+    database = await get_context()
 
-    return certificate.cert
+    certificate_bytes = await database.collections.certificates.find_one(
+        {"common_name": common_name}, sort=[("valid_until", -1)], projection={"cert": 1, "_id": 0}
+    )
+
+    if certificate_bytes is None:
+        raise ValueError("certificate not found in db")
+
+    return extract_public_cert(certificate_bytes)
 
 
 # TODO: dumbass zone, remove when possible
