@@ -160,7 +160,8 @@ async def _recovery_loop(r: aioredis.Redis) -> None:  # pyright: ignore[reportUn
 
 
 def main():
-    worker_id = f"{gethostname()}:{os.getpid()}:{os.urandom(4).hex()}" # This should be unique enough and completely readable
+    # This ID should be unique enough and completely readable
+    worker_id = f"{gethostname()}:{os.getpid()}:{os.urandom(4).hex()}" 
     redis_client = aioredis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=None)
     loop = asyncio.new_event_loop()
 

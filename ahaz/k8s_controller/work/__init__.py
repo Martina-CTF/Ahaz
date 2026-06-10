@@ -393,7 +393,8 @@ class WorkQueue:
                         for child_id in children:
                             if isinstance(child_id, bytes):
                                 child_id = child_id.decode()
-                            # NB: this will not loop forever, as it is guaranteed that there are no circular dependencies
+                            # NB: this will not loop forever, as it is guaranteed that there are
+                            # no circular dependencies
                             await self.mark_failed(child_id, abandon=True)
                     else:
                         # Retry immediately
