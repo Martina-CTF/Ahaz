@@ -6,15 +6,14 @@ from threading import Thread
 
 import redis.asyncio as aioredis
 import uvicorn
-from pydantic import ValidationError
-from quart import Quart, make_response, request
-
 from ahaz_common import (
     ChallengeRequest,
     # RegisterTeamRequest,
     TeamRequest,
     UserRequest,
 )
+from pydantic import ValidationError
+from quart import Quart, make_response, request
 
 from .controller import (
     get_pods_namespace,
