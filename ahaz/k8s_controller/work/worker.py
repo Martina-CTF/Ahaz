@@ -3,13 +3,9 @@ import json
 import logging
 import os
 import sys
-
-# FIXME: this shit is ass, we need relative imports working
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import traceback
-import uuid
 from datetime import datetime, timezone
+from socket import gethostname
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -17,7 +13,7 @@ import redis.asyncio as aioredis
 from . import WORK_QUEUE, WorkQueue, tasks
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-
+RECOVERY_INTERVAL = int(os.getenv("RECOVERY_INTERVAL", "5"))
 
 LOGLEVEL = os.getenv("LOGLEVEL", "INFO").upper()
 logging.basicConfig(
@@ -160,11 +156,11 @@ async def _recovery_loop(r: aioredis.Redis) -> None:  # pyright: ignore[reportUn
                     # Atomic failed because something else modified `key`, retry
                     continue
 
-        await asyncio.sleep(5)  # Check every 5 seconds
+        await asyncio.sleep(RECOVERY_INTERVAL)  # Check every 5 seconds
 
 
 def main():
-    worker_id = str(uuid.uuid4())
+    worker_id = f"{gethostname()}:{os.getpid()}:{os.urandom(4).hex()}" # This should be unique enough and completely readable
     redis_client = aioredis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=None)
     loop = asyncio.new_event_loop()
 

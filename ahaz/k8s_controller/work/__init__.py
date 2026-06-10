@@ -388,6 +388,13 @@ class WorkQueue:
                         await pipe.hset(
                             key, mapping={"state": "failed", "lease_until": 0, "attempts": max_attempts}
                         )
+                        # Mark children as abandoned recursively, since their dependencies will never be met
+                        children = await self.redis_client.smembers(f"task:children:{task_id}")
+                        for child_id in children:
+                            if isinstance(child_id, bytes):
+                                child_id = child_id.decode()
+                            # NB: this will not loop forever, as it is guaranteed that there are no circular dependencies
+                            await self.mark_failed(child_id, abandon=True)
                     else:
                         # Retry immediately
                         await pipe.hset(key, mapping={"state": "pending", "lease_until": 0})
