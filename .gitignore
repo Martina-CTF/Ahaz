@@ -17,9 +17,9 @@ data/certs/*
 # MySQL database files
 data/mysqldb/mysqldb_volume/*
 
-# Redis data files
-data/redis/*
-!data/redis/.gitkeep
+# Valkey data files
+data/valkey/*
+!data/valkey/.gitkeep
 
 # Docker Compose override
 docker-compose.override.yaml

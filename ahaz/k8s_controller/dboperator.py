@@ -215,39 +215,7 @@ def get_last_port() -> int:
 def delete_team_and_vpn(teamname: str) -> None:
     teamID = get_team_id(teamname)
     with get_connection() as conn, conn.cursor() as cursor:
-        cursor.execute("DELETE from register_status WHERE name = %s", (teamname,))
         cursor.execute("DELETE FROM vpn_map WHERE teamID = %s", (teamID,))
         cursor.execute("DELETE FROM vpn_storage WHERE teamID = %s", (teamID,))
         cursor.execute("DELETE from teams WHERE teamID = %s", (teamID,))
-        conn.commit()
-
-
-def get_registration_progress_team(teamname: str) -> int:
-    with get_connection() as conn, conn.cursor() as cursor:
-        cursor.execute("SELECT state FROM register_status WHERE name='" + teamname + "' ORDER BY state DESC")
-        rows = cursor.fetchall()
-
-    if len(rows) == 0 or len(rows[0]) == 0:
-        return -999
-    return int(rows[0][0])
-
-
-def get_registration_progress_user(teamname: str, username: str) -> str:
-    with get_connection() as conn, conn.cursor() as cursor:
-        cursor.execute(
-            "SELECT state FROM register_status WHERE name=%s and user=%s ORDER BY state DESC",
-            (teamname, username),
-        )
-        rows = cursor.fetchall()
-    if len(rows) == 0 or len(rows[0]) == 0:
-        return "null"
-    return rows[0][0]
-
-
-def set_registration_progress_team(teamname: str, username: str, status: int) -> None:
-    with get_connection() as conn, conn.cursor() as cursor:
-        cursor.execute(
-            "INSERT INTO register_status (name, user, state, timestamp) VALUES (%s, %s, %s, %s)",
-            (teamname, username, status, getUTCasStr()),
-        )
         conn.commit()
