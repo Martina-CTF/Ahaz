@@ -169,34 +169,33 @@ class WorkQueue:
                         task.deps = [dep for dep in task.deps if dep not in finished_tasks]
 
                     # Enqueue tasks
-                    async with self.redis_client.pipeline() as pipe:
-                        pipe.multi()
-                        for task in tasks:
-                            await pipe.hset(
-                                f"task:{task.id}",
-                                mapping={
-                                    "state": "pending",
-                                    "payload": json.dumps({"type": task.type, **task.payload}),
-                                    "deps_remaining": len(task.deps),
-                                    "attempts": 0,
-                                    "max_attempts": MAX_ATTEMPTS,
-                                    "lease_until": 0,
-                                    "worker": "",
-                                },
-                            )
+                    pipe.multi()
+                    for task in tasks:
+                        await pipe.hset(
+                            f"task:{task.id}",
+                            mapping={
+                                "state": "pending",
+                                "payload": json.dumps({"type": task.type, **task.payload}),
+                                "deps_remaining": len(task.deps),
+                                "attempts": 0,
+                                "max_attempts": MAX_ATTEMPTS,
+                                "lease_until": 0,
+                                "worker": "",
+                            },
+                        )
 
-                            # Reverse dependency graph
-                            for dep in task.deps:
-                                # This function is sad :(
-                                await pipe.sadd(f"task:children:{dep}", task.id)
+                        # Reverse dependency graph
+                        for dep in task.deps:
+                            # This function is sad :(
+                            await pipe.sadd(f"task:children:{dep}", task.id)
 
-                            # Immediately runnable
-                            if not task.deps:
-                                await pipe.rpush(WORK_QUEUE, task.id)
+                        # Immediately runnable
+                        if not task.deps:
+                            await pipe.rpush(WORK_QUEUE, task.id)
 
-                        await pipe.execute()
+                    await pipe.execute()
 
-                        return [task.id for task in tasks] + [x for x in finished_tasks]
+                    return [task.id for task in tasks] + [x for x in finished_tasks]
             except aioredis.WatchError:
                 # Atomic failed because something else modified one of the watched keys, retry
                 continue

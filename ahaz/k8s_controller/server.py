@@ -8,7 +8,6 @@ import redis.asyncio as aioredis
 import uvicorn
 from ahaz_common import (
     ChallengeRequest,
-    # RegisterTeamRequest,
     TeamRequest,
     UserRequest,
 )
@@ -276,15 +275,15 @@ async def worker_service(worker_count: int):
 
 def main():
     Thread(
-        target=asyncio.new_event_loop().run_until_complete,
-        args=(worker_service(int(os.getenv("WORKER_COUNT", 4))),),
+        target=lambda: asyncio.new_event_loop().run_until_complete(
+            worker_service(int(os.getenv("WORKER_COUNT", 4)))
+        ),
         daemon=True,
     ).start()
 
     # Dedicated thread for Kubernetes watcher
     Thread(
-        target=asyncio.new_event_loop().run_until_complete,
-        args=(k8s_watcher(redis_client),),
+        target=lambda: asyncio.new_event_loop().run_until_complete(k8s_watcher(redis_client)),
         daemon=True,
     ).start()
 
