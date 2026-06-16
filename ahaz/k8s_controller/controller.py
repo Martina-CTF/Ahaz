@@ -4,6 +4,7 @@ import os
 import time
 import traceback
 
+import redis.asyncio as aioredis
 from ahaz_common.task import AccessEnum, PodInformation
 from kubernetes import config, watch
 from kubernetes.client import (
@@ -62,7 +63,6 @@ from .db.operator import (
     get_only_certificate_by_common_name,
     get_task_definition,
 )
-from .events import RedisEventManager
 
 # This file has `#type: ignore` comments to ignore type checking errors from the kubernetes client library,
 # which has weird/bad type annotations.
@@ -642,6 +642,7 @@ def create_team_namespace(teamname: str) -> None:
     ensure_kube_config_loaded()
     try:
         core_api = CoreV1Api()
+        logger.debug(f"Creating namespace {teamname}")
         core_api.create_namespace(V1Namespace(metadata=V1ObjectMeta(name=teamname)))
         logger.debug(f"Moving regcred into namespace {teamname}")
 
@@ -907,7 +908,7 @@ def delete_namespace(teamname: str, timeout: int = 300, interval: int = 5) -> in
         raise e
 
 
-async def k8s_watcher(event_manager: RedisEventManager) -> None:
+async def k8s_watcher(redis_client: aioredis.Redis) -> None:
     ensure_kube_config_loaded()
     core_api = CoreV1Api()
     w = watch.Watch()
@@ -955,9 +956,7 @@ async def k8s_watcher(event_manager: RedisEventManager) -> None:
                 "challenge": challenge_name,
             }
 
-            await event_manager.publish_event(
-                "ahaz_events", json.dumps({"type": "pod_event", "data": event_data})
-            )
+            await redis_client.publish("ahaz_events", json.dumps({"type": "pod_event", "data": event_data}))
         except Exception as e:
             logger.error("Error processing Kubernetes event:")
             logger.error(e)

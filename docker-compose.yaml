@@ -3,6 +3,8 @@ services:
     depends_on:
       db:
         condition: service_started
+      valkey:
+        condition: service_healthy
     image: ghcr.io/martina-ctf/ahaz:latest
     build:
       context: .
@@ -18,7 +20,7 @@ services:
       DB_DBNAME: "ahaz"
       DB_USERNAME: "mongodb"
       DB_PASSWORD: "I_LOVE_NOSQL!!!"
-      REDIS_URL: "redis://redis:6379"
+      REDIS_URL: "redis://valkey:6379"
       PUBLIC_DOMAINNAME: "ahaz.lan"
       K8S_IP_RANGE: "10.42.0.0 255.255.255.0"
       K8S_IMAGEPULLSECRET_NAME: "regcred"
@@ -46,11 +48,18 @@ services:
     # FIXME: Disable me in prod!
     ports:
       - "27017:27017"
-  redis:
-    image: redis:4
+  valkey:
+    image: valkey/valkey:9.1.0-alpine
     restart: always
     volumes:
-      - ./data/redis:/data
+      - ./data/valkey:/data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
+      interval: 30s
+      timeout: 60s
+      retries: 5
+      start_period: 10s
+      start_interval: 0.1s
     networks:
       internal:
 networks:

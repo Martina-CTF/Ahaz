@@ -12,7 +12,7 @@ dependencies = [
     "uvicorn>=0.38.0",
     "ahaz-common",
     "tenacity>=9.1.2",
-    "redis>=7.0.1",
+    "redis>=8.0.0",
     "asyncio>=4.0.0",
     "quart>=0.20.0",
     "pymongo[srv]>=4.17.0",
@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 server = "k8s_controller.server:main"
+worker = "k8s_controller.work.worker:main"
 
 [tool.uv.sources]
 ahaz_common = { workspace = true }

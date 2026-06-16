@@ -26,7 +26,8 @@ RUN apk add --no-cache \
     openvpn \
     openssl \
     python3 \
-    py3-pip
+    py3-pip \
+    tini
 
 # Kube config should be mounted on image start
 ENV KUBECONFIG=/.kube/config.yml
@@ -46,6 +47,9 @@ COPY ahaz ahaz/
 COPY common common/
 
 RUN uv sync --all-packages
+
+# Ahaz can spawn child processes (workers), so we need to use tini to handle reaping zombie processes
+ENTRYPOINT ["/sbin/tini", "--"]
 
 # Run the server
 CMD ["/bin/uv", "run", "server"]

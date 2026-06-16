@@ -20,9 +20,9 @@ data/mysqldb/mysqldb_volume/*
 # MongoDB data files
 ahaz_data/mongodb/*
 
-# Redis data files
-data/redis/*
-!data/redis/.gitkeep
+# Valkey data files
+data/valkey/*
+!data/valkey/.gitkeep
 
 # Docker Compose override
 docker-compose.override.yaml

@@ -48,11 +48,4 @@ CREATE table env_vars(
     env_var_name varchar(1024),
     env_var_value varchar(1024)
 );
-
-CREATE table register_status(
-    name varchar(255),
-    user varchar(255),
-    state int,
-    timestamp bigint
-);
 ```
