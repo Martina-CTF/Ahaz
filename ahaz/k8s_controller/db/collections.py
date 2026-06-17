@@ -9,7 +9,6 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from .models.certificate import CertificateDoc
 from .models.deployment import TaskDeploymentDoc
-from .models.registerprocess import RegisterProgressDoc
 from .models.task import TaskDefinitionDoc
 from .models.team import TeamDoc
 
@@ -30,7 +29,6 @@ class Collections:
     task_definitions: AsyncCollection[TaskDefinitionDoc]
     teams: AsyncCollection[TeamDoc]
     task_deployments: AsyncCollection[TaskDeploymentDoc]
-    register_progress: AsyncCollection[RegisterProgressDoc]
 
 
 @dataclass(slots=True)
@@ -89,7 +87,6 @@ async def get_context() -> MongoContext:
                 task_definitions=db["task_definitions"],
                 teams=db["teams"],
                 task_deployments=db["task_deployments"],
-                register_progress=db["register_progress"],
             ),
         )
 

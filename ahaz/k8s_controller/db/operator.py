@@ -107,35 +107,3 @@ async def get_only_certificate_by_common_name(common_name: str) -> str:
         raise ValueError("certificate not found in db")
 
     return extract_public_cert(certificate_bytes)
-
-
-# TODO: dumbass zone, remove when possible
-async def set_registration_progress_team(team_id: str, user_id: str, progress: int) -> None:
-    database = await get_context()
-
-    await database.collections.register_progress.update_one(
-        {"team_id": team_id, "user_id": user_id},
-        {"$set": {"progress": progress}},
-        upsert=True,
-    )
-
-
-async def get_registration_progress_team(team_id: str, user_id: str) -> int | None:
-    database = await get_context()
-
-    progress_doc = await database.collections.register_progress.find_one(
-        {"team_id": team_id, "user_id": user_id}
-    )
-
-    if progress_doc is None:
-        return None
-
-    return progress_doc["progress"]
-
-
-async def get_registration_progress_team_any(team_id: str) -> int | None:
-    database = await get_context()
-
-    doc = await database.collections.register_progress.find_one({"team_id": team_id}, sort=[("progress", -1)])
-
-    return doc["progress"] if doc else None
