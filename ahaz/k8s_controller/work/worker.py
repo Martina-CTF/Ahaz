@@ -31,21 +31,19 @@ logging.getLogger("mysql").setLevel(logging.INFO)
 async def do_work(work_type: str, payload: dict[str, Any]) -> None:
     match work_type:
         case "gen_cert":
-            tasks.gen_cert(
+            await tasks.gen_cert(
                 payload["team_id"], payload["port"], payload["public_domainname"], payload["certdir"]
             )
         case "create_namespace":
             tasks.create_namespace(payload["team_id"])
         case "create_vpn_container":
-            tasks.create_vpn_container(payload["team_id"])
+            await tasks.create_vpn_container(payload["team_id"])
         case "expose_vpn_container":
             tasks.expose_vpn_container(payload["team_id"], payload["port"])
         case "insert_db":
-            tasks.insert_db(payload["team_id"], payload["port"])
+            await tasks.insert_db(payload["team_id"], payload["port"])
         case "register_user":
-            tasks.register_user(payload["team_id"], payload["user_id"])
-        case "insert_user_db":
-            tasks.insert_user_db(payload["team_id"], payload["user_id"])
+            await tasks.register_user(payload["team_id"], payload["user_id"])
         case _:
             raise Exception(f"Unknown work type: {work_type}")
 
@@ -161,7 +159,7 @@ async def _recovery_loop(r: aioredis.Redis) -> None:  # pyright: ignore[reportUn
 
 def main():
     # This ID should be unique enough and completely readable
-    worker_id = f"{gethostname()}:{os.getpid()}:{os.urandom(4).hex()}" 
+    worker_id = f"{gethostname()}:{os.getpid()}:{os.urandom(4).hex()}"
     redis_client = aioredis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=None)
     loop = asyncio.new_event_loop()
 

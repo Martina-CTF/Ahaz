@@ -205,13 +205,6 @@ async def autogenerate():
                 idempotent_on={"team_id": request_data.team_id, "user_id": request_data.user_id},
                 deps=["gen_cert"],
             ),
-            Work(
-                id="insert_user_db",
-                type="insert_user_db",
-                payload={"team_id": request_data.team_id, "user_id": request_data.user_id},
-                idempotent_on={"team_id": request_data.team_id, "user_id": request_data.user_id},
-                deps=["register_user"],
-            ),
         ]
     )
 
