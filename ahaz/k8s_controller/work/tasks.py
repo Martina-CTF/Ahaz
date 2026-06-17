@@ -1,6 +1,6 @@
 from .. import certmanager, controller
 from ..db.models.team import Team
-from ..db.operator import set_range
+from ..db.operator import set_team
 
 
 async def gen_cert(team_id: str, port: int, public_domainname: str, certdir: str):
@@ -21,7 +21,7 @@ def expose_vpn_container(team_id: str, port: int):
 
 async def insert_db(team_id: str, port: int):
     team = Team(team_id=team_id, port=port)
-    await set_range(team)
+    await set_team(team)
 
 
 async def register_user(team_id: str, user_id: str):

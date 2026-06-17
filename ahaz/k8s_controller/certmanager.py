@@ -26,7 +26,7 @@ from .db.models.certificate import Certificate
 from .db.operator import (
     get_certificate_by_common_name,
     get_only_certificate_by_common_name,
-    get_range,
+    get_team,
     insert_certificate,
 )
 
@@ -616,7 +616,7 @@ async def get_client_ovpn_config(
 
 async def get_team_vpn_pod_port(team_id: str) -> int:
     try:
-        team_range = await get_range(team_id)
+        team_range = await get_team(team_id)
         return team_range.port
     except ValueError:
         return TEAM_PORT_RANGE_START + int(team_id) - 1

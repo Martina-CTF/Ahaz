@@ -38,7 +38,7 @@ async def get_task_definition(name: str) -> Task:
     return Task.model_validate(task)
 
 
-async def set_range(team: Team) -> None:
+async def set_team(team: Team) -> None:
     database = await get_context()
 
     team_doc = TeamDoc(team_id=team.team_id, port=team.port)
@@ -50,7 +50,7 @@ async def set_range(team: Team) -> None:
     )
 
 
-async def get_range(team_id: str) -> Team:
+async def get_team(team_id: str) -> Team:
     database = await get_context()
 
     team_range: TeamDoc | None = await database.collections.teams.find_one({"team_id": team_id})
