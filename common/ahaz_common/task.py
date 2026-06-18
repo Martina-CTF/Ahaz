@@ -25,6 +25,7 @@ class EnvironmentInformation(BaseModel):
 class LimitInformation(BaseModel):
     ram: str = "128Mi"
     cpu: str = "1"
+    ephemeral_storage: str = "128Mi"
 
 
 class ImageInformation(BaseModel):

@@ -19,6 +19,7 @@ class EnvironmentInformationDoc(TypedDict):
 class LimitInformationDoc(TypedDict):
     ram: str
     cpu: str
+    ephemeral_storage: str
 
 
 class ImageInformationDoc(TypedDict):
@@ -67,7 +68,9 @@ def task_to_task_doc(task: Task) -> TaskDefinitionDoc:
                 name=pod.name,
                 visible=pod.visible,
                 image=ImageInformationDoc(name=pod.image.name),
-                limits=LimitInformationDoc(ram=pod.limits.ram, cpu=pod.limits.cpu),
+                limits=LimitInformationDoc(
+                    ram=pod.limits.ram, cpu=pod.limits.cpu, ephemeral_storage=pod.limits.ephemeral_storage
+                ),
                 networks=pod.networks,
                 env=[EnvironmentInformationDoc(name=e.name, value=e.value) for e in pod.env],
             )

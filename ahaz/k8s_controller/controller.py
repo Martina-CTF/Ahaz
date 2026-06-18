@@ -238,7 +238,7 @@ async def start_challenge_pod(team_name: str, pod: PodInformation, task_name: st
                                 # TODO: Implement util function to convert *ilo to *ibi
                                 "memory": pod.limits.ram.replace("Gb", "Gi"),
                                 "cpu": str(pod.limits.cpu),
-                                "ephemeral-storage": "128Mi",  # TODO: add storage limit to task spec
+                                "ephemeral-storage": pod.limits.ephemeral_storage.replace("Gb", "Gi"),
                             },
                             requests={
                                 "memory": "0",
