@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TypedDict
 
@@ -27,20 +28,31 @@ class CertificateDoc(TypedDict):
     revocation_list: bytes | None
 
 
-class Certificate(BaseModel):
-    # The crypto objects aren't really serializable which pydantic does not like.
-    # Perhaps this is not the best way.
-    # TODO: figure out if this is the best way
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    serial_number: int
-    common_name: str
-    valid_until: datetime
-
+@dataclass
+class Certificate:
     cert: x509.Certificate
     private_key: CertificateIssuerPrivateKeyTypes
 
     revocation_list: x509.CertificateRevocationList | None = None  # Defined only for CA certs
+
+    # Properties to easily access cert data
+    @property
+    def serial_number(self) -> int:
+        return self.cert.serial_number
+
+    @property
+    def valid_until(self) -> datetime:
+        return self.cert.not_valid_after
+
+    @property
+    def common_name(self) -> str:
+        value = self.cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value
+
+        if not isinstance(value, str):
+            # not really a thing that can happen in our case
+            raise ValueError("Invalid common name type in certificate")
+
+        return value
 
     def get_certificate_pem(self) -> str:
         return self.cert.public_bytes(encoding=serialization.Encoding.PEM).decode()
@@ -52,45 +64,44 @@ class Certificate(BaseModel):
             encryption_algorithm=serialization.NoEncryption(),
         ).decode()
 
+    def to_doc(self) -> CertificateDoc:
+        return CertificateDoc(
+            # Cache our properties so we can query them in the DB!
+            serial_number=self.serial_number.to_bytes(20, "big"),
+            common_name=self.common_name,
+            valid_until=self.valid_until,
+            # Serialize the cert as DER, since that is more efficient space-wise than PEM
+            # (and we'll be converting it back to a Certificate object when we read it from the DB anyway)
+            cert=self.cert.public_bytes(encoding=serialization.Encoding.DER),
+            # Encrypt the private key before storing it in the DB, for at-rest protection.
+            # It's admittedly nominal.
+            private_key=self.private_key.private_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.BestAvailableEncryption(KEY_STORAGE_SECRET.encode()),
+            ),
+            revocation_list=self.revocation_list.public_bytes(encoding=serialization.Encoding.DER)
+            if self.revocation_list
+            else None,
+        )
 
-def cert_to_doc(cert: Certificate) -> CertificateDoc:
-    return CertificateDoc(
-        serial_number=cert.serial_number.to_bytes(20, "big"),
-        common_name=cert.common_name,
-        valid_until=cert.valid_until,
-        # Serialize the cert as DER, since that is more efficient space-wise than PEM
-        # (and we'll be converting it back to a Certificate object when we read it from the DB anyway)
-        cert=cert.cert.public_bytes(encoding=serialization.Encoding.DER),
-        # Encrypt the private key before storing it in the DB, for at-rest protection.
-        # It's admittedly nominal.
-        private_key=cert.private_key.private_bytes(
-            encoding=serialization.Encoding.DER,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.BestAvailableEncryption(KEY_STORAGE_SECRET.encode()),
-        ),
-        revocation_list=cert.revocation_list.public_bytes(encoding=serialization.Encoding.DER)
-        if cert.revocation_list
-        else None,
-    )
+    @classmethod
+    def from_doc(cls, doc: CertificateDoc) -> "Certificate":
+        private_key = serialization.load_der_private_key(
+            doc["private_key"],
+            password=KEY_STORAGE_SECRET.encode(),
+        )
 
+        if not isinstance(private_key, CertificateIssuerPrivateKeyTypes):
+            raise ValueError("Invalid private key type")  # some doofus must've inserted a bad private key
 
-def doc_to_cert(doc: CertificateDoc) -> Certificate:
-    private_key = serialization.load_der_private_key(
-        doc["private_key"],
-        password=KEY_STORAGE_SECRET.encode(),
-    )
-
-    if not isinstance(private_key, CertificateIssuerPrivateKeyTypes):
-        raise ValueError("Invalid private key type")  # some doofus must've inserted a bad private key
-
-    return Certificate(
-        serial_number=int.from_bytes(doc["serial_number"], "big"),
-        common_name=doc["common_name"],
-        valid_until=doc["valid_until"],
-        cert=x509.load_der_x509_certificate(doc["cert"]),
-        private_key=private_key,
-        revocation_list=x509.load_der_x509_crl(doc["revocation_list"]) if doc["revocation_list"] else None,
-    )
+        return Certificate(
+            cert=x509.load_der_x509_certificate(doc["cert"]),
+            private_key=private_key,
+            revocation_list=x509.load_der_x509_crl(doc["revocation_list"])
+            if doc["revocation_list"]
+            else None,
+        )
 
 
 # This is mainly so it can be saved to a config

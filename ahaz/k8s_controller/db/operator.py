@@ -4,7 +4,7 @@ from os import getenv
 from ahaz_common.task import Task
 
 from .collections import get_context
-from .models.certificate import Certificate, CertificateDoc, cert_to_doc, doc_to_cert, extract_public_cert
+from .models.certificate import Certificate, CertificateDoc, extract_public_cert
 from .models.task import TaskDefinitionDoc, task_to_task_doc
 from .models.team import Team, TeamDoc
 
@@ -64,7 +64,7 @@ async def get_team(team_id: str) -> Team:
 async def insert_certificate(cert: Certificate) -> None:
     database = await get_context()
 
-    cert_doc = cert_to_doc(cert)
+    cert_doc = cert.to_doc()
 
     await database.collections.certificates.insert_one(cert_doc)
 
@@ -79,7 +79,7 @@ async def get_certificate(serial_number: int) -> Certificate:
     if cert_doc is None:
         raise ValueError("certificate not found in db")
 
-    return doc_to_cert(cert_doc)
+    return Certificate.from_doc(cert_doc)
 
 
 async def get_certificate_by_common_name(common_name: str) -> Certificate:
@@ -93,7 +93,7 @@ async def get_certificate_by_common_name(common_name: str) -> Certificate:
     if cert_doc is None:
         raise ValueError("certificate not found in db")
 
-    return doc_to_cert(cert_doc)
+    return Certificate.from_doc(cert_doc)
 
 
 async def get_only_certificate_by_common_name(common_name: str) -> str:

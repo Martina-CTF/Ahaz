@@ -265,11 +265,8 @@ set_var EASYRSA_DIGEST "sha512"
             raise ValueError("Invalid CA private key type")  # what the fuck is easyrsa doing if this procs
 
         ca_cert = Certificate(
-            serial_number=ca_cert_obj.serial_number,
-            common_name=ca_cn,
             cert=ca_cert_obj,
             private_key=ca_cert_key,
-            valid_until=ca_cert_obj.not_valid_after,
             revocation_list=None,  # TODO: some beautiful day, someone beautiful will implement this
         )
 
@@ -298,11 +295,8 @@ set_var EASYRSA_DIGEST "sha512"
             raise ValueError("Invalid server private key type")
 
         server_cert = Certificate(
-            serial_number=server_cert_obj.serial_number,
-            common_name=f"{cn}",
             cert=server_cert_obj,
             private_key=server_cert_key,
-            valid_until=server_cert_obj.not_valid_after,
         )
 
         await insert_certificate(server_cert)
@@ -655,11 +649,8 @@ async def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> st
         raise ValueError("Invalid client private key type")
 
     client_cert = Certificate(
-        serial_number=client_cert_obj.serial_number,
-        common_name=cn,
         cert=client_cert_obj,
         private_key=client_cert_key,
-        valid_until=client_cert_obj.not_valid_after,
     )
 
     await insert_certificate(client_cert)
