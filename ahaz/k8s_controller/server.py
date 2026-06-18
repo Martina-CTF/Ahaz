@@ -119,7 +119,7 @@ async def get_pods_namespace_request():
         return "Invalid request data", 400
 
     logger.info(f"Getting pods for team {request_data.team_id}")
-    podresult = get_pods_namespace(str(request_data.team_id), False)
+    podresult = await get_pods_namespace(str(request_data.team_id), False)
     logger.debug(f"Pods for team {request_data.team_id}:\n{podresult}")
     return podresult
 

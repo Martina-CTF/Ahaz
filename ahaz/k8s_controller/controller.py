@@ -361,7 +361,7 @@ async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[
 
 
 @retry(**retry_opts)
-def get_pods_namespace(team_name: str, show_invisible: bool) -> str:
+async def get_pods_namespace(team_name: str, show_invisible: bool) -> str:
     ensure_kube_config_loaded()
     try:
         core_api = CoreV1Api()
@@ -370,7 +370,7 @@ def get_pods_namespace(team_name: str, show_invisible: bool) -> str:
         if not pod_list.items:
             return json.dumps([])
 
-        pod_info = summarise_pods_list(pod_list, show_invisible)
+        pod_info = await summarise_pods_list(pod_list, show_invisible)
 
         return json.dumps(pod_info)
     except ApiException as e:
