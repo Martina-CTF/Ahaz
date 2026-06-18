@@ -247,8 +247,7 @@ set_var EASYRSA_DIGEST "sha512"
         with open(path.join(directory, "pki/vars"), "w", encoding="utf-8") as f:
             f.write(vars_content)
         logger.info("Building certificiate authority (CA)")
-        ca_cn = f"ca.{'.'.join(cn.split('.')[1:])}"
-        subprocess.run([easyrsa, "build-ca", "nopass"], input=f"{ca_cn}\n", **common_args)
+        subprocess.run([easyrsa, "build-ca", "nopass"], input=f"ca.{cn}\n", **common_args)
 
         # Read the CA data into DB
         # HACK: Hacky, but this will be changed soon with a different PR anyways
@@ -275,17 +274,18 @@ set_var EASYRSA_DIGEST "sha512"
         # logger.info("Generating Diffie-Hellman (DH) parameters")
         # subprocess.run([easyrsa, "gen-dh"], **common_args)
         logger.info("Building server certificiate")
-        subprocess.run([easyrsa, "build-server-full", cn, "nopass"], **common_args)
+        server_cn = f"server.{cn}"
+        subprocess.run([easyrsa, "build-server-full", server_cn, "nopass"], **common_args)
 
         # Read the server certificate and key into DB
         # HACK: again, hacky, this will change anyways
-        with open(path.join(directory, f"pki/issued/{cn}.crt"), "r", encoding="utf-8") as f:
+        with open(path.join(directory, f"pki/issued/{server_cn}.crt"), "r", encoding="utf-8") as f:
             server_crt = f.read()
 
             # Trim non-pem data
             server_crt = server_crt[server_crt.find("-----BEGIN") :]
 
-        with open(path.join(directory, f"pki/private/{cn}.key"), "r", encoding="utf-8") as f:
+        with open(path.join(directory, f"pki/private/{server_cn}.key"), "r", encoding="utf-8") as f:
             server_key = f.read()
 
         server_cert_obj = x509.load_pem_x509_certificate(server_crt.encode())
@@ -517,7 +517,7 @@ async def gen_team(
         if easyrsa is None:
             raise RuntimeError("EasyRSA installation not found")
         logger.debug("=4")
-        await init_pki(easyrsa, teamdirContainer, domainname)
+        await init_pki(easyrsa, teamdirContainer, f"{teamname}.{domainname}")
         logger.debug("=5")
         gen_configs_ovpn(teamdirContainer, domainname, port, protocol)
         logger.debug("=6")
