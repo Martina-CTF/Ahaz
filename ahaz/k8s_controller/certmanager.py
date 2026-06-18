@@ -29,6 +29,7 @@ from .db.operator import (
     get_team,
     insert_certificate,
 )
+from .util.cidr import parse_ip_range
 
 logger = logging.getLogger()
 script_dir = path.dirname(path.realpath(__file__))
@@ -51,6 +52,7 @@ defaults = {
 
 PUBLIC_DOMAINNAME = getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 TEAM_PORT_RANGE_START = int(getenv("TEAM_PORT_RANGE_START", "20000"))
+K8S_IP_RANGE = getenv("K8S_IP_RANGE", "10.42.0.0 255.255.0.0")
 
 GITHUB_RELEASE_API = "https://api.github.com/repos/OpenVPN/easy-rsa/releases/{:s}"
 EASYRSA_TAG = "v3.1.0"
@@ -566,6 +568,10 @@ async def get_client_ovpn_config(
         config.append(f"remote {ovpn_cn} {ovpn_port} tcp")
 
     config.extend(ovpn_extra_client_config)
+
+    # Write route
+    config.append("route-nopull")
+    config.append(f"route {parse_ip_range(K8S_IP_RANGE)}")
 
     try:
         client_cert = await get_certificate_by_common_name(cn)
