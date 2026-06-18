@@ -5,7 +5,7 @@ from ahaz_common.task import Task
 
 from .collections import get_context
 from .models.certificate import Certificate, CertificateDoc, extract_public_cert
-from .models.task import TaskDefinitionDoc, task_to_task_doc
+from .models.task import TaskDoc, task_to_task_doc
 from .models.team import Team, TeamDoc
 
 K8S_IP_RANGE = getenv("K8S_IP_RANGE", "10.42.0.0 255.255.0.0")
@@ -30,7 +30,7 @@ async def insert_task_definition(task: Task) -> None:
 async def get_task_definition(name: str) -> Task:
     database = await get_context()
 
-    task: TaskDefinitionDoc | None = await database.collections.task_definitions.find_one({"name": name})
+    task: TaskDoc | None = await database.collections.task_definitions.find_one({"name": name})
 
     if task is None:
         raise ValueError("challenge not found in db")

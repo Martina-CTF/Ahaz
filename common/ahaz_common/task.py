@@ -31,6 +31,7 @@ class LimitInformation(BaseModel):
 class ImageInformation(BaseModel):
     name: str
     context: Optional[str] = None
+    registry: Optional[str] = None
 
     def __str__(self) -> str:
         return f"ImageInformation(name={self.name})"

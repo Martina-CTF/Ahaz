@@ -1,6 +1,6 @@
 from typing import Optional, TypedDict
 
-from ahaz_common.task import Task
+from ahaz_common.task import NetworkInformation, PodInformation, Task
 
 # Defines all the data we might want to store in a DB about a task definition.
 # Subset of Task object from common.
@@ -41,7 +41,7 @@ class TaskInformationDoc(TypedDict):
     flag: Optional[str]
 
 
-class TaskDefinitionDoc(TypedDict):
+class TaskDoc(TypedDict):
     name: str
     api_version: Optional[str]
     version: Optional[str]
@@ -52,38 +52,41 @@ class TaskDefinitionDoc(TypedDict):
     networks: list[NetworkInformationDoc]
 
 
-# TODO: Maybe a better way to drop unnecessary fields, idk.
-def task_to_task_doc(task: Task) -> TaskDefinitionDoc:
-    return TaskDefinitionDoc(
+def pod_to_pod_doc(pod: PodInformation) -> PodInformationDoc:
+    return PodInformationDoc(
+        name=pod.name,
+        visible=pod.visible,
+        image=ImageInformationDoc(name=pod.image.name),
+        limits=LimitInformationDoc(
+            ram=pod.limits.ram, cpu=pod.limits.cpu, ephemeral_storage=pod.limits.ephemeral_storage
+        ),
+        networks=pod.networks,
+        env=[EnvironmentInformationDoc(name=e.name, value=e.value) for e in pod.env],
+    )
+
+
+def network_to_network_doc(net: NetworkInformation) -> NetworkInformationDoc:
+    return NetworkInformationDoc(
+        name=net.name,
+        access=[a.value for a in net.access],
+    )
+
+
+def task_to_task_doc(task: Task) -> TaskDoc:
+    return TaskDoc(
         name=task.name,
         api_version=task.api_version,
         version=task.version,
         # This makes sorting/querying by version easier/faster, it does not matter anywhere but the DB layer.
         version_serialized=[int(x) for x in task.version.split(".")] if task.version else [],
-        info=TaskInformationDoc(
-            name=task.info.name,
-            flag=task.info.flag,
-        )
-        if task.info
-        else None,
-        pods=[
-            PodInformationDoc(
-                name=pod.name,
-                visible=pod.visible,
-                image=ImageInformationDoc(name=pod.image.name),
-                limits=LimitInformationDoc(
-                    ram=pod.limits.ram, cpu=pod.limits.cpu, ephemeral_storage=pod.limits.ephemeral_storage
-                ),
-                networks=pod.networks,
-                env=[EnvironmentInformationDoc(name=e.name, value=e.value) for e in pod.env],
+        info=(
+            TaskInformationDoc(
+                name=task.info.name,
+                flag=task.info.flag,
             )
-            for pod in task.pods
-        ],
-        networks=[
-            NetworkInformationDoc(
-                name=net.name,
-                access=[a.value for a in net.access],
-            )
-            for net in task.networks
-        ],
+            if task.info
+            else None
+        ),
+        pods=[pod_to_pod_doc(pod) for pod in task.pods],
+        networks=[network_to_network_doc(net) for net in task.networks],
     )

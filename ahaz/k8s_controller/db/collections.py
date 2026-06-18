@@ -9,7 +9,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from .models.certificate import CertificateDoc
 from .models.deployment import TaskDeploymentDoc
-from .models.task import TaskDefinitionDoc
+from .models.task import TaskDoc
 from .models.team import TeamDoc
 
 DB_IP = getenv("DB_IP", "10.33.0.3")
@@ -26,7 +26,7 @@ logger = logging.getLogger()
 @dataclass(slots=True)
 class Collections:
     certificates: AsyncCollection[CertificateDoc]
-    task_definitions: AsyncCollection[TaskDefinitionDoc]
+    task_definitions: AsyncCollection[TaskDoc]
     teams: AsyncCollection[TeamDoc]
     task_deployments: AsyncCollection[TaskDeploymentDoc]
 
