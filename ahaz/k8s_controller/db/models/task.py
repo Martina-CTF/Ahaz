@@ -45,6 +45,7 @@ class TaskDefinitionDoc(TypedDict):
     name: str
     api_version: Optional[str]
     version: Optional[str]
+    version_serialized: list[int]
 
     info: Optional[TaskInformationDoc]
     pods: list[PodInformationDoc]
@@ -57,6 +58,8 @@ def task_to_task_doc(task: Task) -> TaskDefinitionDoc:
         name=task.name,
         api_version=task.api_version,
         version=task.version,
+        # This makes sorting/querying by version easier/faster, it does not matter anywhere but the DB layer.
+        version_serialized=[int(x) for x in task.version.split(".")] if task.version else [],
         info=TaskInformationDoc(
             name=task.info.name,
             flag=task.info.flag,
