@@ -2,7 +2,7 @@ import enum
 import re
 from typing import Optional
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 RFC1123_REGEX = re.compile(r"^(?=.{1,63}$)[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$")
 
@@ -41,9 +41,9 @@ class PodInformation(BaseModel):
     name: str
     visible: bool = False
     image: ImageInformation
-    limits: LimitInformation = LimitInformation()
-    networks: list[str] = []
-    env: list[EnvironmentInformation] = []
+    limits: LimitInformation = Field(default_factory=LimitInformation)
+    networks: list[str] = Field(default_factory=list)
+    env: list[EnvironmentInformation] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
@@ -70,8 +70,8 @@ class Task(BaseModel):
     api_version: Optional[str] = "v1"
     version: Optional[str] = "1.0.0"
     info: Optional[TaskInformation] = None
-    pods: list[PodInformation] = []
-    networks: list[NetworkInformation] = []
+    pods: list[PodInformation] = Field(default_factory=list)
+    networks: list[NetworkInformation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def fill_info(self):
