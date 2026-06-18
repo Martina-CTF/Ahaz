@@ -82,7 +82,7 @@ async def start_challenge_request():
         f"Received start challenge request for challenge {request_data.challenge_id}"
         + f" from {request_data.team_id}"
     )
-    status = start_challenge(request_data.team_id, request_data.challenge_id)
+    status = await start_challenge(request_data.team_id, request_data.challenge_id)
     if status == 0:
         status = "successfully created challenge"
     return str(status), 200

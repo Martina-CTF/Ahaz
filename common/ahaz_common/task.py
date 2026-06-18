@@ -79,6 +79,13 @@ class Task(BaseModel):
             self.info = TaskInformation(name=self.name)
         return self
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not RFC1123_REGEX.match(v):
+            raise ValueError("name must be a valid RFC 1123 subdomain")
+        return v
+
     @field_validator("version")
     @classmethod
     def validate_version(cls, v: str) -> str:
