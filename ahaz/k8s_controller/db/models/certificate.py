@@ -6,7 +6,6 @@ from typing import TypedDict
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.types import CertificateIssuerPrivateKeyTypes
-from pydantic import BaseModel, ConfigDict
 
 # Used for encrypting the private key at-rest. It's not really equivalent to a real secret store,
 # but at least makes a pure-DB compromise less useful.
