@@ -147,67 +147,47 @@ retry_opts = {
 }
 
 
-@retry(**retry_opts)
-def create_network_policy_deny_all(namespace: str) -> V1NetworkPolicy:
-    ensure_kube_config_loaded()
-
-    try:
-        policy = V1NetworkPolicy(
-            api_version="networking.k8s.io/v1",
-            kind="NetworkPolicy",
-            metadata=V1ObjectMeta(name="deny-all"),
-            spec=V1NetworkPolicySpec(
-                pod_selector=V1LabelSelector(match_labels={}),
-                policy_types=["Ingress", "Egress"],
-                ingress=[],
-                egress=[],
-            ),
-        )
-        return policy
-    except ApiException as e:
-        if e.status != 403:
-            logger.error(f"API Exception when creating deny-all network policy: {e}")
-        raise e
+def create_network_policy_deny_all() -> V1NetworkPolicy:
+    policy = V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=V1ObjectMeta(name="deny-all"),
+        spec=V1NetworkPolicySpec(
+            pod_selector=V1LabelSelector(match_labels={}),
+            policy_types=["Ingress", "Egress"],
+            ingress=[],
+            egress=[],
+        ),
+    )
+    return policy
 
 
-@retry(**retry_opts)
-def create_network_policy(namespace: str) -> V1NetworkPolicy:
-    ensure_kube_config_loaded()
-
-    try:
-        policy = V1NetworkPolicy(
-            api_version="networking.k8s.io/v1",
-            kind="NetworkPolicy",
-            metadata=V1ObjectMeta(name="restrict-vpn-access"),
-            spec=V1NetworkPolicySpec(
-                pod_selector=V1LabelSelector(match_labels={"name": "vpn-container-pod"}),
-                policy_types=["Ingress", "Egress"],
-                ingress=[
-                    V1NetworkPolicyIngressRule(
-                        ports=[
-                            V1NetworkPolicyPort(protocol="TCP", port=1194),
-                            V1NetworkPolicyPort(protocol="UDP", port=1194),
-                        ]
-                    )
-                ],
-                egress=[
-                    # Explicitly deny all egress traffic by default
-                    # Allow communication only within the same namespace
-                    V1NetworkPolicyEgressRule(
-                        to=[
-                            V1NetworkPolicyPeer(
-                                pod_selector=V1LabelSelector(match_labels={"team": namespace})
-                            )
-                        ]
-                    )
-                ],
-            ),
-        )
-        return policy
-    except ApiException as e:
-        if e.status != 403:
-            logger.error(f"API Exception when creating restrict-vpn-access network policy: {e}")
-        raise e
+def create_network_policy(team_id: str) -> V1NetworkPolicy:
+    policy = V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=V1ObjectMeta(name="restrict-vpn-access"),
+        spec=V1NetworkPolicySpec(
+            pod_selector=V1LabelSelector(match_labels={"name": "vpn-container-pod"}),
+            policy_types=["Ingress", "Egress"],
+            ingress=[
+                V1NetworkPolicyIngressRule(
+                    ports=[
+                        V1NetworkPolicyPort(protocol="TCP", port=1194),
+                        V1NetworkPolicyPort(protocol="UDP", port=1194),
+                    ]
+                )
+            ],
+            egress=[
+                # Explicitly deny all egress traffic by default
+                # Allow communication only within the same namespace
+                V1NetworkPolicyEgressRule(
+                    to=[V1NetworkPolicyPeer(pod_selector=V1LabelSelector(match_labels={"team": team_id}))]
+                )
+            ],
+        ),
+    )
+    return policy
 
 
 # TODO: figure out a better way to pass along task info (i.e. version)
@@ -406,90 +386,72 @@ def create_pod_service(team_name: str, task_name: str, k8s_name: str) -> None:
         raise e
 
 
-# FIXME: Is teamname used?
-@retry(**retry_opts)
 def create_network_policy_deny_all_task(task_name: str) -> V1NetworkPolicy:
-    ensure_kube_config_loaded()
-    try:
-        policy = V1NetworkPolicy(
-            api_version="networking.k8s.io/v1",
-            kind="NetworkPolicy",
-            metadata=V1ObjectMeta(name="deny-all-" + task_name, labels={"task": task_name}),
-            spec=V1NetworkPolicySpec(
-                pod_selector=V1LabelSelector(match_labels={"task": task_name}),
-                policy_types=["Ingress", "Egress"],
-                ingress=[],
-                egress=[],
-            ),
-        )
-        return policy
-
-    except ApiException as e:
-        if e.status != 403:
-            logger.error(f"API Exception when creating deny-all network policy for {task_name}: {e}")
-        raise e
+    policy = V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=V1ObjectMeta(name="deny-all-" + task_name, labels={"task": task_name}),
+        spec=V1NetworkPolicySpec(
+            pod_selector=V1LabelSelector(match_labels={"task": task_name}),
+            policy_types=["Ingress", "Egress"],
+            ingress=[],
+            egress=[],
+        ),
+    )
+    return policy
 
 
-@retry(**retry_opts)
 def create_network_policy_allow_task(
     task_name: str, network_pods: list[str], network_name: str
 ) -> V1NetworkPolicy:
-    ensure_kube_config_loaded()
-    try:
-        # Explicitly allow DNS
-        dns_peer = V1NetworkPolicyPeer(
-            namespace_selector=V1LabelSelector(match_labels={"kubernetes.io/metadata.name": "kube-system"}),
-            pod_selector=V1LabelSelector(match_labels={"k8s-app": "kube-dns"}),
-        )
-        dns_egress_rule = V1NetworkPolicyEgressRule(
-            to=[dns_peer],
-            ports=[
-                V1NetworkPolicyPort(protocol="UDP", port=53),
-                V1NetworkPolicyPort(protocol="TCP", port=53),
-            ],
-        )
-        # Explicitly allow the pods within the network
-        pod_selector = V1LabelSelector(
+    # Explicitly allow DNS
+    dns_peer = V1NetworkPolicyPeer(
+        namespace_selector=V1LabelSelector(match_labels={"kubernetes.io/metadata.name": "kube-system"}),
+        pod_selector=V1LabelSelector(match_labels={"k8s-app": "kube-dns"}),
+    )
+    dns_egress_rule = V1NetworkPolicyEgressRule(
+        to=[dns_peer],
+        ports=[
+            V1NetworkPolicyPort(protocol="UDP", port=53),
+            V1NetworkPolicyPort(protocol="TCP", port=53),
+        ],
+    )
+    # Explicitly allow the pods within the network
+    pod_selector = V1LabelSelector(
+        match_expressions=[V1LabelSelectorRequirement(key="name", operator="In", values=network_pods)]
+    )
+
+    peer_selector = V1NetworkPolicyPeer(
+        pod_selector=V1LabelSelector(
             match_expressions=[V1LabelSelectorRequirement(key="name", operator="In", values=network_pods)]
         )
+    )
 
-        peer_selector = V1NetworkPolicyPeer(
-            pod_selector=V1LabelSelector(
-                match_expressions=[V1LabelSelectorRequirement(key="name", operator="In", values=network_pods)]
+    ingress_rule = V1NetworkPolicyIngressRule(_from=[peer_selector])
+    egress_rule = V1NetworkPolicyEgressRule(to=[peer_selector])
+
+    pod_selector = V1LabelSelector(
+        match_expressions=[
+            V1LabelSelectorRequirement(
+                key="name",
+                operator="In",
+                values=network_pods,  # your array of pod names
             )
-        )
+        ]
+    )
 
-        ingress_rule = V1NetworkPolicyIngressRule(_from=[peer_selector])
-        egress_rule = V1NetworkPolicyEgressRule(to=[peer_selector])
-
-        pod_selector = V1LabelSelector(
-            match_expressions=[
-                V1LabelSelectorRequirement(
-                    key="name",
-                    operator="In",
-                    values=network_pods,  # your array of pod names
-                )
-            ]
-        )
-
-        policy = V1NetworkPolicy(
-            api_version="networking.k8s.io/v1",
-            kind="NetworkPolicy",
-            metadata=V1ObjectMeta(name="allow-all-" + network_name, labels={"task": task_name}),
-            spec=V1NetworkPolicySpec(
-                pod_selector=pod_selector,
-                policy_types=["Ingress", "Egress"],
-                ingress=[ingress_rule],
-                egress=[dns_egress_rule, egress_rule],
-            ),
-        )
-        return policy
-    except ApiException as e:
-        if e.status != 403:
-            logger.error(
-                f"API Exception when creating allow-all network policy for network {network_name}: {e}"
-            )
-        raise e
+    policy = V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=V1ObjectMeta(name="allow-all-" + network_name, labels={"task": task_name}),
+        spec=V1NetworkPolicySpec(
+            pod_selector=pod_selector,
+            policy_types=["Ingress", "Egress"],
+            ingress=[ingress_rule],
+            egress=[dns_egress_rule, egress_rule],
+        ),
+    )
+    return policy
 
 
 @retry(**retry_opts)
@@ -820,7 +782,7 @@ def expose_team_vpn_container(teamname: str, externalport: int) -> None:
         )  # type: ignore
         logger.debug(f"Service created. Status: '{api_service_response.status}'")
 
-        policy_deny = create_network_policy_deny_all(teamname)
+        policy_deny = create_network_policy_deny_all()
         policy = create_network_policy(teamname)
         logger.debug("The following network policies will be applied:")
         logger.debug(f"Deny-all policy: {policy_deny}")
@@ -844,7 +806,6 @@ def expose_team_vpn_container(teamname: str, externalport: int) -> None:
         raise e
 
 
-# TODO: I just completely sidestepped the fckn DB for configs, need to move it to cert-based logic lmao
 async def register_user_ovpn(team_name: str, user_name: str) -> str:
     vpnDirLocation = CERT_DIR_CONTAINER + team_name
     await generate_user(team_name, user_name, vpnDirLocation)
