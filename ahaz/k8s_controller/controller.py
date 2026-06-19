@@ -307,15 +307,15 @@ async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[
 
         # Test if pod is visible
         if "visible" in pod.metadata.labels:
-            pod_visible = int(pod.metadata.labels["visible"])
+            pod_visible = bool(pod.metadata.labels["visible"])
         else:
             if pod.metadata.name != "vpn-container-pod":
                 logger.warning(
                     f"Pod {pod.metadata.name} in namespace {pod.metadata.namespace} missing 'visible' label."
                 )
-            pod_visible = 1  # default to visible if label is missing
+            pod_visible = True  # default to visible if label is missing
 
-        if pod_visible != 1 and not showInvisible:
+        if not pod_visible and not showInvisible:
             continue
 
         # Get pod status
