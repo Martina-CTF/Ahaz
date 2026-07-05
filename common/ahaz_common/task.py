@@ -5,6 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 RFC1123_REGEX = re.compile(r"^(?=.{1,63}$)[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$")
+PORT_REGEX = re.compile(r"^\d+(/(tcp|udp))?:\d+$")
 
 
 class AccessEnum(enum.Enum):
@@ -60,7 +61,7 @@ class PodInformation(BaseModel):
     @classmethod
     def validate_exposed_ports(cls, v: list[str]) -> list[str]:
         for port in v:
-            if not re.match(r"^\d+(/(tcp|udp))?:\d+$", port):
+            if not re.match(PORT_REGEX, port):
                 raise ValueError(f"Invalid port format: {port}")
         return v
 
