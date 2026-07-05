@@ -354,7 +354,7 @@ def create_pod_service(team_name: str, task_name: str, pod_name: str) -> None:
 
         service = V1Service(
             metadata=V1ObjectMeta(
-                name=pod_name, 
+                name=pod_name,
                 namespace=team_name,
                 labels={"task": task_name},
             ),

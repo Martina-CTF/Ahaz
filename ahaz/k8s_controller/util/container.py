@@ -11,6 +11,7 @@ def get_image_name(image: ImageInformation) -> str:
 
 size_regex = r"^(\d+)([KMGTP]b?)?$"
 
+
 def adapt_limit_size(limit: str) -> str:
     """
     Adapt the limit size to a format that Kubernetes can understand.
@@ -26,6 +27,6 @@ def adapt_limit_size(limit: str) -> str:
     size, unit = match.groups()
 
     # Conver *ilo to *ibi
-    new_size = int(size) * 1000 // 1024 # floor that shi
+    new_size = int(size) * 1000 // 1024  # floor that shi
 
-    return f"{new_size}{unit[0]}i" if unit else f"{new_size}Mi" # assume Mi as default
+    return f"{new_size}{unit[0]}i" if unit else f"{new_size}Mi"  # assume Mi as default
