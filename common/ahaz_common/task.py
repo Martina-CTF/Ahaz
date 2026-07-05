@@ -61,7 +61,7 @@ class PodInformation(BaseModel):
     def validate_exposed_ports(cls, v: list[str]) -> list[str]:
         for port in v:
             if not re.match(r"^\d+(/(tcp|udp))?:\d+$", port):
-            raise ValueError(f"Invalid port format: {port}")
+                raise ValueError(f"Invalid port format: {port}")
         return v
 
 
