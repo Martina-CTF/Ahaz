@@ -120,8 +120,7 @@ def create_env(task: Task) -> list[tuple[PodInformation, Container]]:
                     cpu_count=int(
                         pod.limits.cpu
                     ),  # TODO: Process this better to allow for fractional CPUs, e.g. 0.5
-                    # TODO: Readd this
-                    # ports=exposed_ports,
+                    ports={port.split(":")[0]: port.split(":")[1] for port in pod.exposed_ports},
                     hostname=pod.name,
                     stream=True,
                 )

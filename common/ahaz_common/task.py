@@ -33,6 +33,8 @@ class ImageInformation(BaseModel):
     context: Optional[str] = None
     registry: Optional[str] = None
 
+    build_args: list[EnvironmentInformation] = Field(default_factory=list)
+
     def __str__(self) -> str:
         return f"ImageInformation(name={self.name})"
 
@@ -45,12 +47,23 @@ class PodInformation(BaseModel):
     networks: list[str] = Field(default_factory=list)
     env: list[EnvironmentInformation] = Field(default_factory=list)
 
+    exposed_ports: list[str] = Field(default_factory=list)
+
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
         if not RFC1123_REGEX.match(v):
             raise ValueError("name must be a valid RFC 1123 subdomain")
         return v
+
+    @field_validator("exposed_ports")
+    @classmethod
+    def validate_exposed_ports(cls, v: list[str]) -> list[str]:
+        for port in v:
+            if not re.match(r"^\d+(/(tcp|udp))?:\d+$", port):
+            raise ValueError(f"Invalid port format: {port}")
+        return v
+
 
     def __str__(self) -> str:
         return f"PodInfo(name={self.name}, visible={self.visible})"

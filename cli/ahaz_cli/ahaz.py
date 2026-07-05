@@ -60,12 +60,10 @@ def test(
             # Build the image
             status.update(f"Building image '{image_tag}'...")
             log.info(f"Building image '{image_tag}' for pod '{pod.name}'...")
-            # TODO: Integrate build args into spec
-            # build_args = {arg.name: arg.value for arg in (pod.image.build_args or [])}
-            build_args = {}
+            build_args = {arg.name: arg.value for arg in pod.image.build_args}
             assert pod.image.context is not None, (
                 "Image context must be specified for building"
-            )  # TODO: Make subset where this is always true
+            )
             try:
                 try_build_image(image_tag, pod.image.context, build_args, verbose)
             except Exception as e:
