@@ -24,7 +24,7 @@ class LimitInformationDoc(TypedDict):
 
 class ImageInformationDoc(TypedDict):
     name: str
-    # TODO: define registry and what other nonsense
+    registry: Optional[str]
 
 
 class PodInformationDoc(TypedDict):
@@ -56,7 +56,7 @@ def pod_to_pod_doc(pod: PodInformation) -> PodInformationDoc:
     return PodInformationDoc(
         name=pod.name,
         visible=pod.visible,
-        image=ImageInformationDoc(name=pod.image.name),
+        image=ImageInformationDoc(name=pod.image.name, registry=pod.image.registry),
         limits=LimitInformationDoc(
             ram=pod.limits.ram, cpu=pod.limits.cpu, ephemeral_storage=pod.limits.ephemeral_storage
         ),
