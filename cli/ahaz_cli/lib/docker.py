@@ -8,7 +8,6 @@ import docker.models
 import docker.models.networks
 import rich
 import rich.ansi
-import rich.style
 from ahaz_common.task import PodInformation, Task
 from docker.errors import BuildError, NotFound
 from docker.models.containers import Container
