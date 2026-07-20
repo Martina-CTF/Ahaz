@@ -3,6 +3,8 @@ services:
     depends_on:
       db:
         condition: service_started
+      valkey:
+        condition: service_healthy
     image: ghcr.io/martina-ctf/ahaz:latest
     build:
       context: .
@@ -10,15 +12,15 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./ahaz_data/certs/:/certdir
-      - ./ahaz_data/kubectl:/.kube/
+      - ./data/certs/:/certdir
+      - ./data/kubectl:/.kube/
     environment:
       CERT_DIR_CONTAINER: "/certdir/"
       DB_IP: "db"
       DB_DBNAME: "ahaz"
-      DB_USERNAME: "dbeaver"
-      DB_PASSWORD: "dbeaver"
-      REDIS_URL: "redis://redis:6379"
+      DB_USERNAME: "mongodb"
+      DB_PASSWORD: "I_LOVE_NOSQL!!!"
+      REDIS_URL: "redis://valkey:6379"
       PUBLIC_DOMAINNAME: "ahaz.lan"
       K8S_IP_RANGE: "10.42.0.0 255.255.255.0"
       K8S_IMAGEPULLSECRET_NAME: "regcred"
@@ -32,23 +34,32 @@ services:
     networks:
       internal:
       default:
-  db:
-    image: mysql:9.5
-    volumes:
-      - ./ahaz_data/mysqldb/mysqldb_volume:/var/lib/mysql
-      - ./ahaz_data/mysqldb/init.sh:/docker-entrypoint-initdb.d/init.sh
+  db: 
+    image: mongo:8.3.2
     environment:
-      MYSQL_ROOT_PASSWORD: "shooch4SXe2iech9Aiv1do0pISuh8xeaahDe3WoTvoowae4Xahl0eZ1NDutaegh2"
-      MYSQL_DATABASE: "ahaz"
-      MYSQL_USER: "dbeaver"
-      MYSQL_PASSWORD: "dbeaver"
+      MONGO_INITDB_ROOT_USERNAME: "mongodb"
+      MONGO_INITDB_ROOT_PASSWORD: "I_LOVE_NOSQL!!!"
+      MONGO_INITDB_DATABASE: "ahaz"
+      GLIBC_TUNABLES: "glibc.pthread.rseq=1" # fixes a bug in mongo where it hates newer kernels, see https://jira.mongodb.org/browse/SERVER-121912
+    volumes:
+      - ./data/mongodb:/data/db
     networks:
       internal:
-  redis:
-    image: redis:4
+    # FIXME: Disable me in prod!
+    ports:
+      - "27017:27017"
+  valkey:
+    image: valkey/valkey:9.1.0-alpine
     restart: always
     volumes:
-      - ./ahaz_data/redis:/data
+      - ./data/valkey:/data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
+      interval: 30s
+      timeout: 60s
+      retries: 5
+      start_period: 10s
+      start_interval: 0.1s
     networks:
       internal:
 networks:
