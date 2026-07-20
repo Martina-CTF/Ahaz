@@ -17,6 +17,9 @@ data/certs/*
 # MySQL database files
 data/mysqldb/mysqldb_volume/*
 
+# MongoDB data files
+ahaz_data/mongodb/*
+
 # Valkey data files
 data/valkey/*
 !data/valkey/.gitkeep

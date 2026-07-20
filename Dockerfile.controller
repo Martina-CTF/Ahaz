@@ -11,16 +11,6 @@ RUN apk add --no-cache curl && \
   chmod +x ./kubectl && \
   mv ./kubectl /usr/local/bin
 
-
-# Get EasyRSA
-ARG EASYRSA_VERSION=3.1.0
-ARG EASYRSA_NAME=EasyRSA-${EASYRSA_VERSION}.tgz
-ARG EASYRSA_URL=https://github.com/OpenVPN/easy-rsa/releases/download/v${EASYRSA_VERSION}/${EASYRSA_NAME}
-
-ADD --unpack=true ${EASYRSA_URL} /app/ahaz/k8s_controller/tools/
-RUN ln -sf /app/ahaz/k8s_controller/tools/EasyRSA-${EASYRSA_VERSION}/easyrsa /usr/local/bin/easyrsa
-RUN chmod +x /usr/local/bin/easyrsa
-
 # Install Python and OpenVPN
 RUN apk add --no-cache \
     openvpn \
