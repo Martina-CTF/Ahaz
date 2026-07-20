@@ -13,60 +13,14 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.types import CertificateIssuerPrivateKeyTypes
 
+from k8s_controller.db.models.certificate import Certificate
+
+from ..db.operator import get_certificate_by_common_name, insert_certificate
+
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certdir")
 
 logger = logging.getLogger()
-
-
-def init_pki(team_id: str) -> None:
-    # TODO: Move towards a database-driven approach where we store PKI data inside of a database instead of
-    # a filesystem.
-    directory = Path(CERT_DIR_CONTAINER) / team_id
-
-    logger.debug(f"Initializing PKI for {cn} in directory {directory}...")
-
-    # Create directory structure
-    os.makedirs(os.path.join(directory, "pki", "private"), exist_ok=True)
-    os.makedirs(os.path.join(directory, "pki", "issued"), exist_ok=True)
-
-    # Set perms on pki/private
-    os.chmod(os.path.join(directory, "pki", "private"), 0o700)
-
-    # Generate CA key and cert
-    # ca_key = generate_key()
-    ca_cert = create_CA_certificate(ca_key, f"ca.{cn}")
-
-    # Write CA key and cert to disk
-    with open(os.path.join(directory, "pki", "private", "ca.key"), "wb") as f:
-        f.write(
-            ca_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
-
-    with open(os.path.join(directory, "pki", "ca.crt"), "wb") as f:
-        f.write(ca_cert.public_bytes(serialization.Encoding.PEM))
-
-    # Generate server cert
-    server_key = generate_key()
-    # TODO: Differentiate teams, perhaps?
-    server_cert = create_signed_certificate(server_key, ca_key, ca_cert, f"server.{cn}", server=True)
-
-    # Write server key and cert to disk
-    with open(os.path.join(directory, "pki", "private", "server.key"), "wb") as f:
-        f.write(
-            server_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
-
-    with open(os.path.join(directory, "pki", "issued", "server.crt"), "wb") as f:
-        f.write(server_cert.public_bytes(serialization.Encoding.PEM))
 
 
 def get_team_pki_dir(team_id: str) -> Path:
@@ -85,67 +39,63 @@ def get_team_pki_dir(team_id: str) -> Path:
 
 
 # TODO: The PKI state changes here! Handle accordingly.
-def generate_ca(team_id: str) -> x509.Certificate:
-    directory = get_team_pki_dir(team_id)
+async def generate_ca(team_id: str) -> Certificate:
+    # Check if there's a CA in the DB already
+    try:
+        _ = await get_certificate_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+        logger.warning(f"CA certificate for team {team_id} already exists in the DB, likely rollover")
+    except ValueError:
+        pass  # All good
 
     key = generate_key()
-    cert = create_CA_certificate(key, f"authority.{team_id}.{PUBLIC_DOMAINNAME}")
+    cert = create_CA_certificate(key, f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
 
-    if (directory / "ca.crt").exists():
-        logger.warning(f"CA certificate for team {team_id} already exists, backing up old cert to archive...")
-        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        (directory / "ca.crt").move(directory / "archive" / f"ca_{timestamp}.crt")
+    cert_data = Certificate(cert=cert, private_key=key)
 
-    write_certificate(cert, directory / "ca.crt")
+    await insert_certificate(cert_data)
 
-    return cert
+    return cert_data
 
 
-def get_team_ca(team_id: str) -> x509.Certificate:
-    directory = get_team_pki_dir(team_id)
+async def get_team_ca(team_id: str) -> Certificate:
+    cert = None
 
-    if not (directory / "ca.crt").exists():
+    try:
+        cert = await get_certificate_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+    except ValueError:
         logger.info(f"No CA certificate found for team {team_id}, creating...")
-        cert = generate_ca(team_id)
-    else:
-        cert = read_certificate(directory / "ca.crt")
+        cert = await generate_ca(team_id)
 
     # Generate a bit before expiry to allow rollover
-    if cert.not_valid_after < (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)):
+    if cert.cert.not_valid_after < (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)
+    ):
         logger.warning(f"CA certificate for team {team_id} is close to expiry, regenerating...")
-        cert = generate_ca(team_id)
+        cert = await generate_ca(team_id)
 
     return cert
 
 
 # TODO: The PKI state changes here! Handle accordingly.
-def mint_certificate(
+async def mint_certificate(
     team_id: str, cn: str, server: bool = False
-) -> tuple[CertificateIssuerPrivateKeyTypes, x509.Certificate]:
-    directory = get_team_pki_dir(team_id)
-
-    ca_cert = get_team_ca(team_id)
-    ca_key = read_private_key(directory / "private" / "ca.key")
-
-    if (directory / "issued" / f"{cn}.crt").exists() or (directory / "private" / f"{cn}.key").exists():
-        logger.warning(
-            (
-                f"Certificate/key for {cn} already exists for team {team_id},"
-                + " backing up old cert/key to archive..."
-            )
-        )
-        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        if (directory / "issued" / f"{cn}.crt").exists():
-            (directory / "issued" / f"{cn}.crt").move(directory / "archive" / f"{cn}_{timestamp}.crt")
-        if (directory / "private" / f"{cn}.key").exists():
-            (directory / "private" / f"{cn}.key").move(directory / "archive" / f"{cn}_{timestamp}.key")
+) -> Certificate:
+    ca = await get_team_ca(team_id)
+   
+    try: 
+        _ = get_certificate_by_common_name(cn)
+        logger.warning(f"Certificate for {cn} already exists in the DB, likely rollover")
+    except ValueError:
+        pass # First time
 
     key = generate_key()
-    cert = create_signed_certificate(key, ca_key, ca_cert, cn, server=server)
+    cert = create_signed_certificate(key, ca.private_key, ca.cert, cn, server=server)
 
-    write_keypair(key, cert, directory, cn)
+    cert_data = Certificate(cert=cert, private_key=key)
 
-    return key, cert
+    await insert_certificate(cert_data)
+
+    return cert_data
 
 
 def get_server_pair(team_id: str) -> tuple[CertificateIssuerPrivateKeyTypes, x509.Certificate]:
