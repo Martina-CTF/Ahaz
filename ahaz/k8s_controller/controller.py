@@ -7,6 +7,7 @@ import traceback
 
 import redis.asyncio as aioredis
 from ahaz_common.task import AccessEnum, PodInformation
+from ahaz_common.util import adapt_limit_size
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -64,7 +65,7 @@ from .db.operator import (
     get_only_certificate_by_common_name,
     get_task_definition,
 )
-from .util.container import adapt_limit_size, get_image_name
+from .util.container import get_image_name
 
 # This file has `#type: ignore` comments to ignore type checking errors from the kubernetes client library,
 # which has weird/bad type annotations.
