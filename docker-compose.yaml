@@ -47,7 +47,7 @@ services:
       internal:
     # FIXME: Disable me in prod!
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017" # keep it bound to loopback, in case the user forgets to disable; use SSH tunneling to access it on other machines
   valkey:
     image: valkey/valkey:9.1.0-alpine
     restart: always
