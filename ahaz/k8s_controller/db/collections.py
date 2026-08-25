@@ -13,10 +13,12 @@ from .models.deployment import TaskDeploymentDoc
 from .models.task import TaskDoc
 from .models.team import TeamDoc
 
-DB_IP = getenv("DB_IP", "10.33.0.3")
+DB_IP = getenv("DB_IP", None)
+if DB_IP is None:
+    raise ValueError("DB_IP environment variable is not set")
 DB_DBNAME = getenv("DB_DBNAME", "ahaz")
-DB_USERNAME = getenv("DB_USERNAME", "dbeaver")
-DB_PASSWORD = getenv("DB_PASSWORD", "dbeaver")
+DB_USERNAME = getenv("DB_USERNAME", "mongodb")
+DB_PASSWORD = getenv("DB_PASSWORD", "I_LOVE_NOSQL!!!")
 
 DB_TLS_ENABLED = str_to_bool(getenv("DB_TLS_ENABLED", "false"))
 DB_TLS_CA_FILE = getenv("DB_TLS_CA_FILE", None)
