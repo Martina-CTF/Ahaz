@@ -800,9 +800,9 @@ async def register_user_ovpn(team_id: str, user_id: str) -> str:
     return "successfully registered"
 
 
-def obtain_user_ovpn_config(team_id: str, user_id: str) -> str:
+async def obtain_user_ovpn_config(team_id: str, user_id: str) -> str:
     vpnDirLocation = CERT_DIR_CONTAINER + team_id
-    result = get_user(team_id, user_id, vpnDirLocation)
+    result = await get_user(team_id, user_id, vpnDirLocation)
     result = str(result).replace("\\n", "\n")
     return result
 
