@@ -23,7 +23,9 @@ DB_PASSWORD = getenv("DB_PASSWORD", "I_LOVE_NOSQL!!!")
 DB_TLS_ENABLED = str_to_bool(getenv("DB_TLS_ENABLED", "false"))
 DB_TLS_CA_FILE = getenv("DB_TLS_CA_FILE", None)
 DB_TLS_CLIENT_CERT = getenv("DB_TLS_CLIENT_CERT", None)
-DB_TLS_INSECURE = str_to_bool(getenv("DB_TLS_INSECURE", "false"))
+DB_TLS_INSECURE = getenv("DB_TLS_INSECURE", None)
+if DB_TLS_INSECURE is not None:
+    DB_TLS_INSECURE = str_to_bool(DB_TLS_INSECURE)
 
 if DB_TLS_ENABLED and (DB_TLS_CA_FILE is None and DB_TLS_INSECURE is False):
     raise ValueError("DB_TLS_ENABLED is true, but no CA file is provided and DB_TLS_INSECURE is false")
@@ -84,14 +86,20 @@ async def get_context() -> MongoContext:
     loop = asyncio.get_running_loop()
 
     if loop not in contexts:
+        tlsKwargs = {}
+        if DB_TLS_ENABLED:
+            tlsKwargs = {
+                "tlsCAFile": DB_TLS_CA_FILE,
+                "tlsCertificateKeyFile": DB_TLS_CLIENT_CERT,
+                "tlsAllowInvalidCertificates": DB_TLS_INSECURE,
+            }
+
         client = AsyncMongoClient(
             host=DB_IP,
             username=DB_USERNAME,
             password=DB_PASSWORD,
             tls=DB_TLS_ENABLED,
-            tlsCAFile=DB_TLS_CA_FILE,
-            tlsCertificateKeyFile=DB_TLS_CLIENT_CERT,
-            tlsAllowInvalidCertificates=DB_TLS_INSECURE,
+            **tlsKwargs,
         )
         db = client[DB_DBNAME]
 
