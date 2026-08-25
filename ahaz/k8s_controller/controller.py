@@ -66,6 +66,7 @@ from .db.operator import (
     get_task_definition,
 )
 from .util.container import get_image_name
+from .util.misc import str_to_bool
 
 # This file has `#type: ignore` comments to ignore type checking errors from the kubernetes client library,
 # which has weird/bad type annotations.
@@ -295,7 +296,7 @@ async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[
 
         # Test if pod is visible
         if "visible" in pod.metadata.labels:
-            pod_visible = bool(pod.metadata.labels["visible"])
+            pod_visible = str_to_bool(pod.metadata.labels["visible"])
         else:
             if pod.metadata.name != "vpn-container-pod":
                 logger.warning(
@@ -901,7 +902,7 @@ async def k8s_watcher(redis_client: aioredis.Redis) -> None:
                 "pod_namespace": pod_namespace,
                 "pod_status": pod_status,
                 "pod_ip": pod_ip,
-                "visible": bool(pod_labels.get("visible", False)),
+                "visible": str_to_bool(pod_labels.get("visible", "False")),
                 "challenge": challenge_name,
             }
 

@@ -20,6 +20,7 @@ services:
       DB_DBNAME: "ahaz"
       DB_USERNAME: "mongodb"
       DB_PASSWORD: "I_LOVE_NOSQL!!!"
+      KEY_STORAGE_SECRET: "ifsomeonereadthisanddecidedtouseitonmydbiwouldsurebeinawholelotoftrouble"
       REDIS_URL: "redis://valkey:6379"
       PUBLIC_DOMAINNAME: "ahaz.lan"
       K8S_IP_RANGE: "10.42.0.0 255.255.255.0"
