@@ -455,7 +455,7 @@ async def create_challenge_network_policies(task: Task, team_id: str) -> None:
         net_api.create_namespaced_network_policy(namespace=team_id, body=deny_policy)
 
         for network in task.networks:
-            network_pods = [x.name for x in task.pods if network in x.networks]
+            network_pods = [x.name for x in task.pods if network.name in x.networks]
 
             if AccessEnum.player in network.access:  # if it is teamnet, include the vpn pod in whitelist
                 network_pods.append("vpn-container-pod")
