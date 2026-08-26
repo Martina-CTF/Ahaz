@@ -1,4 +1,5 @@
 import logging
+import re
 
 import yaml
 from ahaz_common import Task
@@ -34,4 +35,4 @@ def serialise_task(task: Task) -> str:
 
 def normalise_task_name(name: str) -> str:
     # Make the task lowercase, replace spaces with hyphens, and remove special characters
-    return name.lower().replace(" ", "-").replace(r"([^a-z0-9-])", "")
+    return re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-"))
