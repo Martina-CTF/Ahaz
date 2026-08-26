@@ -8,7 +8,7 @@ RFC1123_REGEX = re.compile(r"^(?=.{1,63}$)[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?
 PORT_REGEX = re.compile(r"^\d+(/(tcp|udp))?:\d+$")
 SIZE_REGEX = re.compile(r"^\d+([KMGTP][ib]?)?$")
 CPU_REGEX = re.compile(r"^\d+m?$")
-NETWORK_NAME_REGEX = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$")
+NETWORK_NAME_REGEX = re.compile(r"^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]?$")
 
 
 class AccessEnum(enum.Enum):
