@@ -10,7 +10,8 @@ powerdict = {"M": 2, "G": 3, "T": 4, "P": 5}
 def adapt_limit_size(limit: str) -> str:
     """
     Adapt the limit size to a format that Kubernetes can understand.
-    For example, if the limit is "512Mb", it will be converted to "512Mi".
+    For example, if the limit is "512Mb", it will be converted to "512M".
+    If the input is a IEC (i.e. Mi) unit or an integer (which represents bytes), it will be returned as is.
     """
 
     # Case 1 - Limit is a valid IEC unit
