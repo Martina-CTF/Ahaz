@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 RFC1123_REGEX = re.compile(r"^(?=.{1,63}$)[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$")
 PORT_REGEX = re.compile(r"^\d+(/(tcp|udp))?:\d+$")
+SIZE_REGEX = re.compile(r"^\d+([KMGTP][ib]?)?$")
+CPU_REGEX = re.compile(r"^\d+m?$")
+NETWORK_NAME_REGEX = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$")
 
 
 class AccessEnum(enum.Enum):
@@ -17,6 +20,13 @@ class NetworkInformation(BaseModel):
     name: str
     access: list[AccessEnum]
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not NETWORK_NAME_REGEX.match(v):
+            raise ValueError("name must be a valid network name")
+        return v
+
 
 class EnvironmentInformation(BaseModel):
     name: str
@@ -27,6 +37,20 @@ class LimitInformation(BaseModel):
     ram: str = "128Mi"
     cpu: str = "1"
     ephemeral_storage: str = "128Mi"
+
+    @field_validator("ram", "ephemeral_storage")
+    @classmethod
+    def validate_size(cls, v: str) -> str:
+        if not SIZE_REGEX.match(v):
+            raise ValueError("size must be a valid Kubernetes size format")
+        return v
+
+    @field_validator("cpu")
+    @classmethod
+    def validate_cpu(cls, v: str) -> str:
+        if not CPU_REGEX.match(v):
+            raise ValueError("cpu must be a valid Kubernetes cpu format")
+        return v
 
 
 class ImageInformation(BaseModel):
@@ -63,6 +87,14 @@ class PodInformation(BaseModel):
         for port in v:
             if not re.match(PORT_REGEX, port):
                 raise ValueError(f"Invalid port format: {port}")
+        return v
+
+    @field_validator("networks")
+    @classmethod
+    def validate_networks(cls, v: list[str]) -> list[str]:
+        for network in v:
+            if not NETWORK_NAME_REGEX.match(network):
+                raise ValueError(f"Invalid network name: {network}")
         return v
 
 
