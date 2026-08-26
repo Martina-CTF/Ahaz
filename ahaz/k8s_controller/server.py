@@ -82,10 +82,16 @@ async def start_challenge_request():
         f"Received start challenge request for challenge {request_data.challenge_id}"
         + f" from {request_data.team_id}"
     )
-    status = await start_challenge(request_data.team_id, request_data.challenge_id)
-    if status == 0:
-        status = "successfully created challenge"
-    return str(status), 200
+
+    try:
+        await start_challenge(request_data.team_id, request_data.challenge_id)
+    except ValueError:
+        return "challenge not found", 404
+    except Exception as e:
+        logger.error(f"Unexpected error starting challenge: {e}")
+        return "error starting challenge", 500
+
+    return "successfully started challenge", 200
 
 
 @app.route("/stop_challenge", methods=["POST", "GET"])

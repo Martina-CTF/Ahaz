@@ -6,7 +6,7 @@ import time
 import traceback
 
 import redis.asyncio as aioredis
-from ahaz_common.task import AccessEnum, PodInformation
+from ahaz_common.task import AccessEnum, PodInformation, Task
 from ahaz_common.util import adapt_limit_size
 from kubernetes import config, watch
 from kubernetes.client import (
@@ -269,10 +269,13 @@ async def start_challenge(team_name: str, task_name: str) -> None:
                 version,
             )
 
-        await create_challenge_network_policies(team_name, task_name)
+        await create_challenge_network_policies(task, team_name)
     except ApiException as e:
         if e.status != 403:
             logger.error(f"API Exception when starting challenge: {e}")
+        raise e
+    except ValueError as e:
+        logger.error(f"ValueError when starting challenge: {e}")
         raise e
 
 
@@ -444,14 +447,12 @@ def create_network_policy_allow_task(
 
 
 @retry(**retry_opts)
-async def create_challenge_network_policies(team_id: str, task_name: str) -> None:
+async def create_challenge_network_policies(task: Task, team_id: str) -> None:
     load_kube_config()
     try:
         net_api = NetworkingV1Api()
-        deny_policy = create_network_policy_deny_all_task(task_name)
+        deny_policy = create_network_policy_deny_all_task(task.name)
         net_api.create_namespaced_network_policy(namespace=team_id, body=deny_policy)
-
-        task = await get_task_definition(task_name)
 
         for network in task.networks:
             network_pods = [x.name for x in task.pods if network in x.networks]
@@ -459,12 +460,12 @@ async def create_challenge_network_policies(team_id: str, task_name: str) -> Non
             if AccessEnum.player in network.access:  # if it is teamnet, include the vpn pod in whitelist
                 network_pods.append("vpn-container-pod")
 
-            allow_policy = create_network_policy_allow_task(task_name, network_pods, network.name)
+            allow_policy = create_network_policy_allow_task(task.name, network_pods, network.name)
             net_api.create_namespaced_network_policy(namespace=team_id, body=allow_policy)
 
     except ApiException as e:
         if e.status != 403:
-            logger.error(f"API Exception when creating challenge network policies for {task_name}: {e}")
+            logger.error(f"API Exception when creating challenge network policies for {task.name}: {e}")
         raise e
 
 
@@ -631,8 +632,14 @@ async def create_team_vpn_configmap(team_id) -> None:
         teamCertDir = CERT_DIR_CONTAINER + team_id
 
         ovpn_config = get_server_ovpn_config(teamCertDir)
-        server_cert = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
-        ca = await get_only_certificate_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+        
+        try:
+            server_cert = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
+            ca = await get_only_certificate_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+        except ValueError as e:
+            logger.error(f"Error retrieving certificates for team {team_id}: {e}")
+            raise e
+
         server_ta = get_server_ta(teamCertDir)
         ovpn_env = get_openvpn_env(teamCertDir)
         up_script = get_up_script(teamCertDir)
