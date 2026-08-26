@@ -27,7 +27,7 @@ DB_TLS_INSECURE = getenv("DB_TLS_INSECURE", None)
 if DB_TLS_INSECURE is not None:
     DB_TLS_INSECURE = str_to_bool(DB_TLS_INSECURE)
 
-if DB_TLS_ENABLED and (DB_TLS_CA_FILE is None and DB_TLS_INSECURE is False):
+if DB_TLS_ENABLED and (DB_TLS_CA_FILE is None and bool(DB_TLS_INSECURE) is False):
     raise ValueError("DB_TLS_ENABLED is true, but no CA file is provided and DB_TLS_INSECURE is false")
 
 # Shut up MongoDB driver logging
@@ -91,7 +91,7 @@ async def get_context() -> MongoContext:
             tlsKwargs = {
                 "tlsCAFile": DB_TLS_CA_FILE,
                 "tlsCertificateKeyFile": DB_TLS_CLIENT_CERT,
-                "tlsAllowInvalidCertificates": DB_TLS_INSECURE,
+                "tlsAllowInvalidCertificates": bool(DB_TLS_INSECURE),
             }
 
         client = AsyncMongoClient(
