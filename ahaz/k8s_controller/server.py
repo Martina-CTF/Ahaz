@@ -137,15 +137,19 @@ async def getuser():
     except ValidationError as e:
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
-
-    config = await get_user(
-        request_data.team_id, request_data.user_id, CERT_DIR_CONTAINER + request_data.team_id
-    )
-
-    if config is None:
+    
+    try:
+        config = await get_user(
+            request_data.team_id, request_data.user_id, CERT_DIR_CONTAINER + request_data.team_id
+        )
+    except ValueError:
+        logger.info(f"User {request_data.user_id} has no certificate yet.")
         return "user not found", 404
-    else:
-        return config, 200, {"Content-Type": "text/plain"}
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving user: {e}")
+        return "error retrieving user", 500
+    
+    return config, 200, {"Content-Type": "text/plain"}
 
 
 @app.route("/autogenerate", methods=["POST", "GET"])

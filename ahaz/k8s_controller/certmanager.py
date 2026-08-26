@@ -604,10 +604,13 @@ async def get_client_ovpn_config(
         )
     except FileNotFoundError as e:
         logger.error(f"Configuration file not found at {e.filename}")
-        return f"Error: Configuration file not found at {e.filename}"
+        raise e
     except subprocess.CalledProcessError as e:
         logger.error(f"Error executing openssl: {e.stderr}")
-        return f"Error executing openssl: {e.stderr}"
+        raise e
+    except ValueError as e:
+        logger.error(f"Error retrieving certificate: {e}")
+        raise e
 
     logger.debug("\n".join(config))
 
@@ -660,14 +663,20 @@ async def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> st
     )
 
     await insert_certificate(client_cert)
-
-    return await get_client_ovpn_config(
-        PUBLIC_DOMAINNAME,
-        cn,
-        path.join(teamVPNDirectory, "pki"),
-        # HACK: make a better way of setting the port the client should connect to
-        ovpn_port=await get_team_vpn_pod_port(team_id),
-    )
+    
+    try:
+        return await get_client_ovpn_config(
+            PUBLIC_DOMAINNAME,
+            cn,
+            path.join(teamVPNDirectory, "pki"),
+            # HACK: make a better way of setting the port the client should connect to
+            ovpn_port=await get_team_vpn_pod_port(team_id),
+        )
+    except Exception as e:
+        # this shouldn't happen
+        # if it does, it will bubble up to the worker loop, so, snore.
+        logger.error(f"Error generating user certificate: {e}")
+        raise e
 
 
 # TODO: Hack to avoid a big logic refactor
@@ -677,13 +686,17 @@ async def user_exists(user_id: str, teamVPNDirectory: str) -> bool:
 
 
 async def get_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
-    return await get_client_ovpn_config(
-        PUBLIC_DOMAINNAME,
-        f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}",
-        path.join(teamVPNDirectory, "pki"),
-        # HACK: make a better way of setting the port the client should connect to
-        ovpn_port=await get_team_vpn_pod_port(team_id),
-    )
+    try:
+        return await get_client_ovpn_config(
+            PUBLIC_DOMAINNAME,
+            f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}",
+            path.join(teamVPNDirectory, "pki"),
+            # HACK: make a better way of setting the port the client should connect to
+            ovpn_port=await get_team_vpn_pod_port(team_id),
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving user certificate: {e}")
+        raise e
 
 
 def get_server_key(certLocation: str) -> str:
