@@ -73,7 +73,7 @@ async def get_certificate(serial_number: int) -> Certificate:
     database = await get_context()
 
     cert_doc: CertificateDoc | None = await database.collections.certificates.find_one(
-        {"serial_number": serial_number}
+        {"serial_number": serial_number.to_bytes(20, "big")}
     )
 
     if cert_doc is None:
