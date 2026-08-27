@@ -77,7 +77,7 @@ logger = logging.getLogger()
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 K8S_IMAGEPULLSECRET_NAMESPACE = os.getenv("K8S_IMAGEPULLSECRET_NAMESPACE", "default")
 K8S_IMAGEPULLSECRET_NAME = os.getenv("K8S_IMAGEPULLSECRET_NAME", "regcred")
-CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certdir")
+CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
 OVPN_IMAGE = os.getenv("OVPN_IMAGE", "lisenet/openvpn")
 OVPN_TAG = os.getenv("OVPN_TAG", "latest")
 
