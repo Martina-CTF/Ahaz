@@ -306,6 +306,7 @@ set_var EASYRSA_DIGEST "sha512"
         logger.error(f"Command '{e.cmd}' failed with exit code {e.returncode}")
         if e.output:
             logger.error(e.output)
+        raise e
 
 
 def append_domain(name: str, domain: str | None) -> str:
