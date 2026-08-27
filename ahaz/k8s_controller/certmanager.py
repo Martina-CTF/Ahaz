@@ -544,8 +544,8 @@ def del_team(teamname: str, certdirlocationContainer: str) -> None:
 
 
 async def get_client_ovpn_config(
-    ovpn_cn: str,
-    cn: str,
+    team_id: str, 
+    user_id: str,
     easyrsa_pki: str,
     ovpn_port: int = 1194,
     ovpn_proto: str = "tcp",
@@ -559,13 +559,13 @@ async def get_client_ovpn_config(
         "nobind",
         "dev tun",
         "remote-cert-tls server",
-        f"remote {ovpn_cn} {ovpn_port} {ovpn_proto}",
+        f"remote {PUBLIC_DOMAINNAME} {ovpn_port} {ovpn_proto}",
     ]
 
     if ovpn_proto == "udp6":
-        config.append(f"remote {ovpn_cn} {ovpn_port} udp")
+        config.append(f"remote {PUBLIC_DOMAINNAME} {ovpn_port} udp")
     elif ovpn_proto == "tcp6":
-        config.append(f"remote {ovpn_cn} {ovpn_port} tcp")
+        config.append(f"remote {PUBLIC_DOMAINNAME} {ovpn_port} tcp")
 
     config.extend(ovpn_extra_client_config)
 
@@ -574,8 +574,8 @@ async def get_client_ovpn_config(
     config.append(f"route {parse_ip_range(K8S_IP_RANGE)}")
 
     try:
-        client_cert = await get_certificate_by_common_name(cn)
-        ca_cert_pem = await get_only_certificate_by_common_name(f"ca.{'.'.join(cn.split('.')[1:])}")
+        client_cert = await get_certificate_by_common_name(f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}")
+        ca_cert_pem = await get_only_certificate_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
         ta_path = os.path.join(easyrsa_pki, "ta.key")
 
         with open(ta_path, "r") as f:
@@ -666,8 +666,8 @@ async def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> st
     
     try:
         return await get_client_ovpn_config(
-            PUBLIC_DOMAINNAME,
-            cn,
+            team_id,
+            user_id,
             path.join(teamVPNDirectory, "pki"),
             # HACK: make a better way of setting the port the client should connect to
             ovpn_port=await get_team_vpn_pod_port(team_id),
@@ -688,8 +688,8 @@ async def user_exists(user_id: str, teamVPNDirectory: str) -> bool:
 async def get_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
     try:
         return await get_client_ovpn_config(
-            PUBLIC_DOMAINNAME,
-            f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}",
+            team_id,
+            user_id,
             path.join(teamVPNDirectory, "pki"),
             # HACK: make a better way of setting the port the client should connect to
             ovpn_port=await get_team_vpn_pod_port(team_id),
