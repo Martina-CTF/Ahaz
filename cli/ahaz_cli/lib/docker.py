@@ -84,6 +84,17 @@ def config_units_to_docker_units(config_value: str) -> str:
     else:
         raise ValueError(f"Unsupported resource unit in value: {config_value}")
 
+def config_cpu_to_docker(config_value: str) -> int:
+    """
+    Convert CPU limit strings from config format to Docker-compatible format.
+    E.g., "1" -> 1.0, "0.5" -> 0.5
+    """
+    try:
+        config_value = config_value.split("m")[0]  # Remove 'm' if present
+        return int(float(config_value) * 100_000)
+    except ValueError as e:
+        raise ValueError(f"Unsupported CPU unit in value: {config_value}") from e
+
 
 def create_env(task: Task) -> list[tuple[PodInformation, Container]]:
     client = docker.from_env()
@@ -116,9 +127,7 @@ def create_env(task: Task) -> list[tuple[PodInformation, Container]]:
                     stdin_open=True,
                     environment=env_vars,
                     mem_limit=config_units_to_docker_units(pod.limits.ram),
-                    cpu_count=int(
-                        pod.limits.cpu
-                    ),  # TODO: Process this better to allow for fractional CPUs, e.g. 0.5
+                    cpu_quota=config_cpu_to_docker(pod.limits.cpu),
                     ports={port.split(":")[0]: int(port.split(":")[1]) for port in pod.exposed_ports},
                     hostname=pod.name,
                     stream=True,
