@@ -96,7 +96,7 @@ async def get_certificate_by_common_name(common_name: str) -> Certificate:
     return Certificate.from_doc(cert_doc)
 
 
-async def get_only_certificate_by_common_name(common_name: str) -> str:
+async def get_pem_by_common_name(common_name: str) -> str:
     database = await get_context()
 
     certificate_bytes = await database.collections.certificates.find_one(

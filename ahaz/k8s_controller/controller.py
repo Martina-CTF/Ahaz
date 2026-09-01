@@ -62,7 +62,7 @@ from .certmanager import (
 )
 from .db.operator import (
     get_certificate_by_common_name,
-    get_only_certificate_by_common_name,
+    get_pem_by_common_name,
     get_task_definition,
 )
 from .util.container import get_image_name
@@ -635,7 +635,7 @@ async def create_team_vpn_configmap(team_id) -> None:
         
         try:
             server_cert = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
-            ca = await get_only_certificate_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+            ca = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
         except ValueError as e:
             logger.error(f"Error retrieving certificates for team {team_id}: {e}")
             raise e

@@ -25,7 +25,7 @@ from cryptography.hazmat.primitives.asymmetric.types import CertificateIssuerPri
 from .db.models.certificate import Certificate
 from .db.operator import (
     get_certificate_by_common_name,
-    get_only_certificate_by_common_name,
+    get_pem_by_common_name,
     get_team,
     insert_certificate,
 )
@@ -576,7 +576,7 @@ async def get_client_ovpn_config(
 
     try:
         client_cert = await get_certificate_by_common_name(f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}")
-        ca_cert_pem = await get_only_certificate_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+        ca_cert_pem = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
         ta_path = os.path.join(easyrsa_pki, "ta.key")
 
         with open(ta_path, "r") as f:
