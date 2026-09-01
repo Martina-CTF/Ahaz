@@ -1,6 +1,6 @@
 [project]
 name = "ahaz_common"
-version = "0.0.1"
+version = "0.1.0"
 description = "Type definitions for Ahaz"
 dependencies = ["pydantic>=2.12.3"]
 
