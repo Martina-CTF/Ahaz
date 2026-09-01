@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+# HACK: This whole file is a mess. I tried to bolt onto the DB changes I wanted to make to sort of show schema
+# , but the mess remains a mess. Maybe I should just merge #8 into here.
+
+
 import argparse
 import io
 import logging
@@ -8,13 +12,24 @@ import re
 import subprocess
 import tarfile
 from os import getenv, listdir, makedirs, path
+from pathlib import Path
 from shutil import rmtree
 from typing import Any, Generator
 
 import requests
 import yaml
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.types import CertificateIssuerPrivateKeyTypes
 
-from .dboperator import get_team_port
+from .db.models.certificate import Certificate
+from .db.operator import (
+    get_certificate_by_common_name,
+    get_pem_by_common_name,
+    get_team,
+    insert_certificate,
+)
+from .util.cidr import parse_ip_range
 
 logger = logging.getLogger()
 script_dir = path.dirname(path.realpath(__file__))
@@ -37,6 +52,7 @@ defaults = {
 
 PUBLIC_DOMAINNAME = getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 TEAM_PORT_RANGE_START = int(getenv("TEAM_PORT_RANGE_START", "20000"))
+K8S_IP_RANGE = getenv("K8S_IP_RANGE", "10.42.0.0 255.255.0.0")
 
 GITHUB_RELEASE_API = "https://api.github.com/repos/OpenVPN/easy-rsa/releases/{:s}"
 EASYRSA_TAG = "v3.1.0"
@@ -211,7 +227,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def init_pki(easyrsa: str, directory: str, cn: str) -> None:
+async def init_pki(easyrsa: str, directory: str, cn: str) -> None:
     easyrsa = path.abspath(easyrsa)
     debug = logger.isEnabledFor(logging.DEBUG)
     common_args = {
@@ -234,14 +250,63 @@ set_var EASYRSA_DIGEST "sha512"
             f.write(vars_content)
         logger.info("Building certificiate authority (CA)")
         subprocess.run([easyrsa, "build-ca", "nopass"], input=f"ca.{cn}\n", **common_args)
+
+        # Read the CA data into DB
+        # HACK: Hacky, but this will be changed soon with a different PR anyways
+        with open(path.join(directory, "pki/ca.crt"), "r", encoding="utf-8") as f:
+            ca_crt = f.read()
+
+        with open(path.join(directory, "pki/private/ca.key"), "r", encoding="utf-8") as f:
+            ca_key = f.read()
+
+        ca_cert_obj = x509.load_pem_x509_certificate(ca_crt.encode())
+        ca_cert_key = serialization.load_pem_private_key(ca_key.encode(), password=None)
+
+        if not isinstance(ca_cert_key, CertificateIssuerPrivateKeyTypes):
+            raise ValueError("Invalid CA private key type")  # what the fuck is easyrsa doing if this procs
+
+        ca_cert = Certificate(
+            cert=ca_cert_obj,
+            private_key=ca_cert_key,
+            revocation_list=None,  # TODO: some beautiful day, someone beautiful will implement this
+        )
+
+        await insert_certificate(ca_cert)
+
         # logger.info("Generating Diffie-Hellman (DH) parameters")
         # subprocess.run([easyrsa, "gen-dh"], **common_args)
         logger.info("Building server certificiate")
-        subprocess.run([easyrsa, "build-server-full", cn, "nopass"], **common_args)
+        server_cn = f"server.{cn}"
+        subprocess.run([easyrsa, "build-server-full", server_cn, "nopass"], **common_args)
+
+        # Read the server certificate and key into DB
+        # HACK: again, hacky, this will change anyways
+        with open(path.join(directory, f"pki/issued/{server_cn}.crt"), "r", encoding="utf-8") as f:
+            server_crt = f.read()
+
+            # Trim non-pem data
+            server_crt = server_crt[server_crt.find("-----BEGIN") :]
+
+        with open(path.join(directory, f"pki/private/{server_cn}.key"), "r", encoding="utf-8") as f:
+            server_key = f.read()
+
+        server_cert_obj = x509.load_pem_x509_certificate(server_crt.encode())
+        server_cert_key = serialization.load_pem_private_key(server_key.encode(), password=None)
+
+        if not isinstance(server_cert_key, CertificateIssuerPrivateKeyTypes):
+            raise ValueError("Invalid server private key type")
+
+        server_cert = Certificate(
+            cert=server_cert_obj,
+            private_key=server_cert_key,
+        )
+
+        await insert_certificate(server_cert)
     except subprocess.CalledProcessError as e:
         logger.error(f"Command '{e.cmd}' failed with exit code {e.returncode}")
         if e.output:
             logger.error(e.output)
+        raise e
 
 
 def append_domain(name: str, domain: str | None) -> str:
@@ -282,9 +347,9 @@ declare -x OVPN_TLS_CIPHER=
     openvpn_conf = open(directory + "/openvpn.conf", "x")
     openvpn_conf.write(f"""server 192.168.255.0 255.255.255.0
 verb 3
-key /etc/openvpn/pki/private/{domainname}.key
+key /etc/openvpn/pki/private/server.key
 ca /etc/openvpn/pki/ca.crt
-cert /etc/openvpn/pki/issued/{domainname}.crt
+cert /etc/openvpn/pki/issued/server.crt
 dh none
 ecdh-curve secp384r1
 # commented out for testing purposes
@@ -441,7 +506,9 @@ def gen_ta_key(directory: str) -> None:
     subprocess.run("/usr/sbin/openvpn --genkey --secret ta.key", cwd=pkidirectory, shell=True)
 
 
-def gen_team(teamname: str, domainname: str, port: int, protocol: str, certdirlocationContainer: str) -> int:
+async def gen_team(
+    teamname: str, domainname: str, port: int, protocol: str, certdirlocationContainer: str
+) -> int:
     try:
         # Cert Generation
         # print("=1", end="")
@@ -453,7 +520,7 @@ def gen_team(teamname: str, domainname: str, port: int, protocol: str, certdirlo
         if easyrsa is None:
             raise RuntimeError("EasyRSA installation not found")
         logger.debug("=4")
-        init_pki(easyrsa, teamdirContainer, domainname)
+        await init_pki(easyrsa, teamdirContainer, f"{teamname}.{domainname}")
         logger.debug("=5")
         gen_configs_ovpn(teamdirContainer, domainname, port, protocol)
         logger.debug("=6")
@@ -477,9 +544,9 @@ def del_team(teamname: str, certdirlocationContainer: str) -> None:
         logger.error("failed to delete container directory for team " + teamname + ": " + str(e))
 
 
-def get_client_ovpn_config(
-    ovpn_cn: str,
-    cn: str,
+async def get_client_ovpn_config(
+    team_id: str, 
+    user_id: str,
     easyrsa_pki: str,
     ovpn_port: int = 1194,
     ovpn_proto: str = "tcp",
@@ -493,35 +560,24 @@ def get_client_ovpn_config(
         "nobind",
         "dev tun",
         "remote-cert-tls server",
-        f"remote {ovpn_cn} {ovpn_port} {ovpn_proto}",
+        f"remote {PUBLIC_DOMAINNAME} {ovpn_port} {ovpn_proto}",
     ]
 
     if ovpn_proto == "udp6":
-        config.append(f"remote {ovpn_cn} {ovpn_port} udp")
+        config.append(f"remote {PUBLIC_DOMAINNAME} {ovpn_port} udp")
     elif ovpn_proto == "tcp6":
-        config.append(f"remote {ovpn_cn} {ovpn_port} tcp")
+        config.append(f"remote {PUBLIC_DOMAINNAME} {ovpn_port} tcp")
 
     config.extend(ovpn_extra_client_config)
 
+    # Write route
+    config.append("route-nopull")
+    config.append(f"route {parse_ip_range(K8S_IP_RANGE)}")
+
     try:
-        key_path = os.path.join(easyrsa_pki, "private", f"{cn}.key")
-        cert_path = os.path.join(easyrsa_pki, "issued", f"{cn}.crt")
-        ca_path = os.path.join(easyrsa_pki, "ca.crt")
+        client_cert = await get_certificate_by_common_name(f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}")
+        ca_cert_pem = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
         ta_path = os.path.join(easyrsa_pki, "ta.key")
-
-        with open(key_path, "r") as f:
-            key_content = f.read()
-
-        # The original script uses `openssl x509 -in ...`. This is often
-        # equivalent to just reading the certificate file if it's in PEM format.
-        # If a specific conversion is required, use the subprocess line instead.
-        result = subprocess.run(
-            ["openssl", "x509", "-in", cert_path], capture_output=True, text=True, check=True
-        )
-        cert_content = result.stdout
-
-        with open(ca_path, "r") as f:
-            ca_content = f.read()
 
         with open(ta_path, "r") as f:
             ta_content = f.read()
@@ -529,13 +585,17 @@ def get_client_ovpn_config(
         config.extend(
             [
                 "\n<key>",
-                key_content.strip(),
+                client_cert.private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.TraditionalOpenSSL,
+                    encryption_algorithm=serialization.NoEncryption(),
+                ).decode(),
                 "</key>",
                 "<cert>",
-                cert_content.strip(),
+                client_cert.cert.public_bytes(serialization.Encoding.PEM).decode(),
                 "</cert>",
                 "<ca>",
-                ca_content.strip(),
+                ca_cert_pem.strip(),
                 "</ca>",
                 "key-direction 1",
                 "<tls-auth>",
@@ -545,25 +605,28 @@ def get_client_ovpn_config(
         )
     except FileNotFoundError as e:
         logger.error(f"Configuration file not found at {e.filename}")
-        return f"Error: Configuration file not found at {e.filename}"
+        raise e
     except subprocess.CalledProcessError as e:
         logger.error(f"Error executing openssl: {e.stderr}")
-        return f"Error executing openssl: {e.stderr}"
+        raise e
+    except ValueError as e:
+        logger.error(f"Error retrieving certificate: {e}")
+        raise e
 
     logger.debug("\n".join(config))
 
     return "\n".join(config)
 
 
-def get_team_vpn_pod_port(team_id: str) -> int:
-    port_resp = get_team_port(team_id)
-    if port_resp != "null":
-        return int(port_resp)
-    else:
+async def get_team_vpn_pod_port(team_id: str) -> int:
+    try:
+        team_range = await get_team(team_id)
+        return team_range.port
+    except ValueError:
         return TEAM_PORT_RANGE_START + int(team_id) - 1
 
 
-def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
+async def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
     easyrsa = obtain_easyrsa()
     if easyrsa is None:
         raise RuntimeError("EasyRSA installation not found")
@@ -576,24 +639,65 @@ def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
         "stderr": subprocess.PIPE if not debug else None,
         "universal_newlines": True,
     }
-    subprocess.run([easyrsa, "build-client-full", user_id, "nopass"], **common_args)
-    return get_client_ovpn_config(
-        PUBLIC_DOMAINNAME,
-        user_id,
-        path.join(teamVPNDirectory, "pki"),
-        # HACK: make a better way of setting the port the client should connect to
-        ovpn_port=get_team_vpn_pod_port(team_id),
+    cn = f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}"
+    subprocess.run([easyrsa, "build-client-full", cn, "nopass"], **common_args)
+
+    # Read the client certificate and key into DB
+    # HACK: again, hacky, this will change anyways
+    with open(path.join(teamVPNDirectory, f"pki/issued/{cn}.crt"), "r", encoding="utf-8") as f:
+        client_crt = f.read()
+
+        # Trim non-pem data
+        client_crt = client_crt[client_crt.find("-----BEGIN") :]
+    with open(path.join(teamVPNDirectory, f"pki/private/{cn}.key"), "r", encoding="utf-8") as f:
+        client_key = f.read()
+
+    client_cert_obj = x509.load_pem_x509_certificate(client_crt.encode())
+    client_cert_key = serialization.load_pem_private_key(client_key.encode(), password=None)
+
+    if not isinstance(client_cert_key, CertificateIssuerPrivateKeyTypes):
+        raise ValueError("Invalid client private key type")
+
+    client_cert = Certificate(
+        cert=client_cert_obj,
+        private_key=client_cert_key,
     )
 
+    await insert_certificate(client_cert)
+    
+    try:
+        return await get_client_ovpn_config(
+            team_id,
+            user_id,
+            path.join(teamVPNDirectory, "pki"),
+            # HACK: make a better way of setting the port the client should connect to
+            ovpn_port=await get_team_vpn_pod_port(team_id),
+        )
+    except Exception as e:
+        # this shouldn't happen
+        # if it does, it will bubble up to the worker loop, so, snore.
+        logger.error(f"Error generating user certificate: {e}")
+        raise e
 
-def get_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
-    return get_client_ovpn_config(
-        PUBLIC_DOMAINNAME,
-        user_id,
-        path.join(teamVPNDirectory, "pki"),
-        # HACK: make a better way of setting the port the client should connect to
-        ovpn_port=get_team_vpn_pod_port(team_id),
-    )
+
+# TODO: Hack to avoid a big logic refactor
+async def user_exists(user_id: str, teamVPNDirectory: str) -> bool:
+    path = Path(teamVPNDirectory) / "pki" / "issued" / f"{user_id}.crt"
+    return path.is_file()
+
+
+async def get_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
+    try:
+        return await get_client_ovpn_config(
+            team_id,
+            user_id,
+            path.join(teamVPNDirectory, "pki"),
+            # HACK: make a better way of setting the port the client should connect to
+            ovpn_port=await get_team_vpn_pod_port(team_id),
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving user certificate: {e}")
+        raise e
 
 
 def get_server_key(certLocation: str) -> str:

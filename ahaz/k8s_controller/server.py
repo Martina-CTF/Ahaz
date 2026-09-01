@@ -11,18 +11,21 @@ from ahaz_common import (
     TeamRequest,
     UserRequest,
 )
+from ahaz_common.task import Task
+from k8s_controller.db.collections import init_db
 from pydantic import ValidationError
 from quart import Quart, make_response, request
 
+from .certmanager import get_user
 from .controller import (
     get_pods_namespace,
     k8s_watcher,
     start_challenge,
     stop_challenge,
 )
-from .dboperator import (
-    get_challenges_from_db,
-    get_user_vpn_config,
+from .db.operator import (
+    insert_task_definition,
+    list_challenges,
 )
 from .work import Work, WorkQueue
 
@@ -54,6 +57,19 @@ def ping():
     return "pong", 200, {"Content-Type": "text/plain"}
 
 
+# HACK: Test function to add a task definition to the DB
+@app.route("/task", methods=["POST"])
+async def create_task():
+    try:
+        request_data = Task(**await request.get_json())
+    except ValidationError as e:
+        logger.error(f"Validation error: {e}")
+        return "Invalid request data", 400
+
+    await insert_task_definition(request_data)
+    return "Task created successfully", 201
+
+
 @app.route("/start_challenge", methods=["POST", "GET"])
 async def start_challenge_request():
     try:
@@ -66,10 +82,16 @@ async def start_challenge_request():
         f"Received start challenge request for challenge {request_data.challenge_id}"
         + f" from {request_data.team_id}"
     )
-    status = start_challenge(request_data.team_id, request_data.challenge_id)
-    if status == 0:
-        status = "successfully created challenge"
-    return str(status), 200
+
+    try:
+        await start_challenge(request_data.team_id, request_data.challenge_id)
+    except ValueError:
+        return "challenge not found", 404
+    except Exception as e:
+        logger.error(f"Unexpected error starting challenge: {e}")
+        return "error starting challenge", 500
+
+    return "successfully started challenge", 200
 
 
 @app.route("/stop_challenge", methods=["POST", "GET"])
@@ -89,9 +111,9 @@ async def stop_challenge_request():
 
 
 @app.route("/get_challenges", methods=["GET"])
-def get_challenges():
-    challenges = get_challenges_from_db()
-    return json.dumps([{"challengename": challenge} for challenge in challenges])
+async def get_challenges():
+    task_list = await list_challenges()
+    return json.dumps([{"challengename": challenge} for challenge in task_list])  # TODO: the fuck?
 
 
 @app.route("/get_pods_namespace", methods=["GET"])
@@ -103,7 +125,11 @@ async def get_pods_namespace_request():
         return "Invalid request data", 400
 
     logger.info(f"Getting pods for team {request_data.team_id}")
-    podresult = get_pods_namespace(str(request_data.team_id), False)
+    try:
+        podresult = await get_pods_namespace(str(request_data.team_id), False)
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving pods: {e}")
+        return "error retrieving pods", 500
     logger.debug(f"Pods for team {request_data.team_id}:\n{podresult}")
     return podresult
 
@@ -115,8 +141,19 @@ async def getuser():
     except ValidationError as e:
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
-
-    return get_user_vpn_config(teamname=request_data.team_id, username=request_data.user_id)
+    
+    try:
+        config = await get_user(
+            request_data.team_id, request_data.user_id, CERT_DIR_CONTAINER + request_data.team_id
+        )
+    except ValueError:
+        logger.info(f"User {request_data.user_id} has no certificate yet.")
+        return "user not found", 404
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving user: {e}")
+        return "error retrieving user", 500
+    
+    return config, 200, {"Content-Type": "text/plain"}
 
 
 @app.route("/autogenerate", methods=["POST", "GET"])
@@ -182,13 +219,6 @@ async def autogenerate():
                 idempotent_on={"team_id": request_data.team_id, "user_id": request_data.user_id},
                 deps=["gen_cert"],
             ),
-            Work(
-                id="insert_user_db",
-                type="insert_user_db",
-                payload={"team_id": request_data.team_id, "user_id": request_data.user_id},
-                idempotent_on={"team_id": request_data.team_id, "user_id": request_data.user_id},
-                deps=["register_user"],
-            ),
         ]
     )
 
@@ -239,6 +269,12 @@ async def events():
     response.timeout = None  # type: ignore
 
     return response
+
+
+@app.before_serving
+async def startup():
+    logger.info("Initializing database...")
+    await init_db()
 
 
 async def worker_service(worker_count: int):

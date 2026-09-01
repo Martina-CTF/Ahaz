@@ -1,81 +1,144 @@
+import enum
+import re
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+RFC1123_REGEX = re.compile(r"^(?=.{1,63}$)[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$")
+PORT_REGEX = re.compile(r"^\d+(/(tcp|udp))?:\d+$")
+SIZE_REGEX = re.compile(r"^\d+([KMGTP][ib]?)?$")
+CPU_REGEX = re.compile(r"^\d+m?$")
+NETWORK_NAME_REGEX = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
-class BuildArg(BaseModel):
+class AccessEnum(enum.Enum):
+    player = "player"
+    internet = "internet"
+
+
+class NetworkInformation(BaseModel):
+    name: str
+    access: list[AccessEnum]
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not NETWORK_NAME_REGEX.match(v):
+            raise ValueError("name must be a valid network name")
+        return v
+
+
+class EnvironmentInformation(BaseModel):
     name: str
     value: str
 
-    def __str__(self):
-        return f"BuildArgs(name={self.name}, value={self.value})"
+
+class LimitInformation(BaseModel):
+    ram: str = "128Mi"
+    cpu: str = "1"
+    ephemeral_storage: str = "128Mi"
+
+    @field_validator("ram", "ephemeral_storage")
+    @classmethod
+    def validate_size(cls, v: str) -> str:
+        if not SIZE_REGEX.match(v):
+            raise ValueError("size must be a valid Kubernetes size format")
+        return v
+
+    @field_validator("cpu")
+    @classmethod
+    def validate_cpu(cls, v: str) -> str:
+        if not CPU_REGEX.match(v):
+            raise ValueError("cpu must be a valid Kubernetes cpu format")
+        return v
 
 
-class Image(BaseModel):
-    image_name: str
-    build_context: str
-    build_args: Optional[list[BuildArg]] = None
-
-    def __str__(self):
-        return (
-            f"Image(image_name={self.image_name}, build_context={self.build_context}, "
-            f"build_args={self.build_args})"
-        )
-
-
-class TestEnv(BaseModel):
-    exposed_ports: list[str]  # Mapping of container port to host port
-
-    def __str__(self):
-        return f"TestEnv(exposed_ports={self.exposed_ports})"
-
-
-class Pod(BaseModel):
+class ImageInformation(BaseModel):
     name: str
-    # TODO: Support multi-image pods
-    image: Image
-    limits_ram: str
-    limits_cpu: int
-    visible_to_user: bool
-    testing: Optional[TestEnv] = None
+    context: Optional[str] = None
+    registry: Optional[str] = None
 
-    def __str__(self):
-        return (
-            f"Pod(name={self.name}, image={self.image}, limits_ram={self.limits_ram}, "
-            f"limits_cpu={self.limits_cpu}, visible_to_user={self.visible_to_user}, testing={self.testing})"
-        )
+    build_args: list[EnvironmentInformation] = Field(default_factory=list)
+
+    def __str__(self) -> str:
+        return f"ImageInformation(name={self.name})"
 
 
-class Network(BaseModel):
+class PodInformation(BaseModel):
     name: str
-    devices: list[str]
+    visible: bool = False
+    image: ImageInformation
+    limits: LimitInformation = Field(default_factory=LimitInformation)
+    networks: list[str] = Field(default_factory=list)
+    env: list[EnvironmentInformation] = Field(default_factory=list)
 
-    def __str__(self):
-        return f"Networks(name={self.name}, devices={self.devices})"
+    exposed_ports: list[str] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not RFC1123_REGEX.match(v):
+            raise ValueError("name must be a valid RFC 1123 subdomain")
+        return v
+
+    @field_validator("exposed_ports")
+    @classmethod
+    def validate_exposed_ports(cls, v: list[str]) -> list[str]:
+        for port in v:
+            if not re.match(PORT_REGEX, port):
+                raise ValueError(f"Invalid port format: {port}")
+        return v
+
+    @field_validator("networks")
+    @classmethod
+    def validate_networks(cls, v: list[str]) -> list[str]:
+        for network in v:
+            if not NETWORK_NAME_REGEX.match(network):
+                raise ValueError(f"Invalid network name: {network}")
+        return v
 
 
-class EnvVar(BaseModel):
-    pod_name: str
+    def __str__(self) -> str:
+        return f"PodInfo(name={self.name}, visible={self.visible})"
+
+
+class TaskInformation(BaseModel):
     name: str
-    value: str
+    description: Optional[str] = None
+    flag: Optional[str] = None
 
-    def __str__(self):
-        return f"EnvVars(pod_name={self.pod_name}, name={self.name}, value={self.value})"
+    def __str__(self) -> str:
+        return f"TaskInformation(name={self.name})"
 
 
 class Task(BaseModel):
     name: str
-    version: str
-    description: str
-    score: int
-    scoring_type: str
-    pods: list[Pod]
-    networks: list[Network]
-    env_vars: Optional[list[EnvVar]] = None
+    api_version: Optional[str] = "v1"
+    version: Optional[str] = "1.0.0"
+    info: Optional[TaskInformation] = None
+    pods: list[PodInformation] = Field(default_factory=list)
+    networks: list[NetworkInformation] = Field(default_factory=list)
 
-    def __str__(self):
-        return (
-            f"Task(name={self.name}, description={self.description}, score={self.score}, "
-            f"scoring_type={self.scoring_type}, pods={self.pods}, networks={self.networks}, "
-            f"env_vars={self.env_vars})"
-        )
+    @model_validator(mode="after")
+    def fill_info(self):
+        if self.info is None:
+            self.info = TaskInformation(name=self.name)
+        return self
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not RFC1123_REGEX.match(v):
+            raise ValueError("name must be a valid RFC 1123 subdomain")
+        return v
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str) -> str:
+        pattern = r"^\d+\.\d+\.\d+$"
+        if not re.match(pattern, v):
+            raise ValueError("version must be in the format X.Y.Z")
+        return v
+
+    def __str__(self) -> str:
+        return f"Task(name={self.name}, version={self.version})"

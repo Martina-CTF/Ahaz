@@ -15,6 +15,7 @@ dependencies = [
     "redis>=8.0.0",
     "asyncio>=4.0.0",
     "quart>=0.20.0",
+    "pymongo[srv]>=4.17.0",
 ]
 
 [project.scripts]
