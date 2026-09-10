@@ -3,19 +3,17 @@ import logging
 import os
 from pathlib import Path
 
-from crypto.certificates import (
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric.types import CertificateIssuerPrivateKeyTypes
+
+from ..db.models.certificate import Certificate
+from ..db.operator import get_certificate_by_common_name, insert_certificate
+from .certificates import (
     create_CA_certificate,
     create_signed_certificate,
     generate_key,
 )
-from crypto.fs import read_certificate, read_keypair, read_private_key, write_certificate, write_keypair
-from cryptography import x509
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.types import CertificateIssuerPrivateKeyTypes
-
-from k8s_controller.db.models.certificate import Certificate
-
-from ..db.operator import get_certificate_by_common_name, insert_certificate
+from .fs import read_certificate, read_keypair, read_private_key, write_certificate, write_keypair
 
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certdir")
@@ -96,37 +94,6 @@ async def mint_certificate(
     await insert_certificate(cert_data)
 
     return cert_data
-
-
-def get_server_pair(team_id: str) -> tuple[CertificateIssuerPrivateKeyTypes, x509.Certificate]:
-    directory = get_team_pki_dir(team_id)
-
-    # It usually should be that both don't exist or both exist
-    # but we'll check both just in case something broke
-    if not (directory / "server.crt").exists() or not (directory / "private" / "server.key").exists():
-        logger.info(f"No server certificate/key pair found for team {team_id}, creating...")
-        key, cert = mint_certificate(team_id, f"server.{team_id}.{PUBLIC_DOMAINNAME}", server=True)
-    else:
-        key, cert = read_keypair(directory, "server")
-
-    return key, cert
-
-
-def get_user_pair(team_id: str, user_id: str) -> tuple[CertificateIssuerPrivateKeyTypes, x509.Certificate]:
-    directory = get_team_pki_dir(team_id)
-
-    # It usually should be that both don't exist or both exist
-    # but we'll check both just in case something broke
-    if (
-        not (directory / "issued" / f"{user_id}.crt").exists()
-        or not (directory / "private" / f"{user_id}.key").exists()
-    ):
-        logger.info(f"No certificate/key pair found for user {user_id} in team {team_id}, creating...")
-        key, cert = mint_certificate(team_id, f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}")
-    else:
-        key, cert = read_keypair(directory, user_id)
-
-    return key, cert
 
 
 def generate_tls_auth_key(team_id: str) -> str:
