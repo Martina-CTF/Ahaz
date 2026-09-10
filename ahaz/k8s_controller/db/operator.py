@@ -41,7 +41,7 @@ async def get_task_definition(name: str) -> Task:
 async def set_team(team: Team) -> None:
     database = await get_context()
 
-    team_doc = TeamDoc(team_id=team.team_id, port=team.port)
+    team_doc = TeamDoc(team_id=team.team_id, port=team.port, ta_key=team.ta_key)
 
     await database.collections.teams.update_one(
         {"team_id": team.team_id},

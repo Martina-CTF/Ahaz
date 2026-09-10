@@ -4,10 +4,12 @@ import logging
 import os
 import time
 import traceback
+from pathlib import Path
 
 import redis.asyncio as aioredis
 from ahaz_common.task import AccessEnum, PodInformation, Task
 from ahaz_common.util import adapt_limit_size
+from cryptography.hazmat.primitives import serialization
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -51,15 +53,6 @@ from kubernetes.client import (
 from kubernetes.client.rest import ApiException
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from .certmanager import (
-    generate_user,
-    get_down_script,
-    get_openvpn_env,
-    get_server_ovpn_config,
-    get_server_ta,
-    get_up_script,
-    get_user,
-)
 from .db.operator import (
     get_certificate_by_common_name,
     get_pem_by_common_name,
@@ -625,7 +618,7 @@ def create_team_namespace(team_id: str) -> None:
 
 
 @retry(**retry_opts)
-async def create_team_vpn_configmap(team_id) -> None:
+async def create_team_vpn_configmap(team_id: str) -> None:
     load_kube_config()
     try:
         core_api = CoreV1Api()
@@ -634,7 +627,7 @@ async def create_team_vpn_configmap(team_id) -> None:
         ovpn_config = get_server_ovpn_config(teamCertDir)
         
         try:
-            server_cert = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
+            server = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
             ca = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
         except ValueError as e:
             logger.error(f"Error retrieving certificates for team {team_id}: {e}")
@@ -642,8 +635,11 @@ async def create_team_vpn_configmap(team_id) -> None:
 
         server_ta = get_server_ta(teamCertDir)
         ovpn_env = get_openvpn_env(teamCertDir)
-        up_script = get_up_script(teamCertDir)
-        down_script = get_down_script(teamCertDir)
+
+        # TODO: Figure a better way to read in the up and down scripts for use in ConfigMap
+        basedir = Path(__file__).parent
+        up_script = (basedir / "assets" / "up.sh").read_text()
+        down_script = (basedir / "assets" / "down.sh").read_text()
 
         config_map = V1ConfigMap(
             api_version="v1",
@@ -651,8 +647,8 @@ async def create_team_vpn_configmap(team_id) -> None:
             metadata=V1ObjectMeta(name=f"{team_id}-vpn-config"),
             data={
                 "ovpn.conf": ovpn_config,
-                "server.key": server_cert.get_private_key_pem(),
-                "server.crt": server_cert.get_certificate_pem(),
+                "server.key": server.get_private_key_pem(),
+                "server.crt": server.get_certificate_pem(),
                 "ca.crt": ca,
                 "ta.key": server_ta,
                 "ovpn.env": ovpn_env,
@@ -800,19 +796,12 @@ def expose_team_vpn_container(team_id: str, port: int) -> None:
         raise e
 
 
-# TODO: Remove this and just call generate_user directly? Certificate rework will not need this, tho.
-async def register_user_ovpn(team_id: str, user_id: str) -> str:
-    vpnDirLocation = CERT_DIR_CONTAINER + team_id
-    await generate_user(team_id, user_id, vpnDirLocation)
+def register_user_ovpn(teamname: str, username: str) -> str:
+    cert_dir = CERT_DIR_CONTAINER + teamname
+    generate_user(teamname, username, cert_dir)
+    # TODO: change
+    # dboperator.insert_user_vpn_config(teamname, username, result)
     return "successfully registered"
-
-
-# TODO: Remove this, nothing calls it.
-async def obtain_user_ovpn_config(team_id: str, user_id: str) -> str:
-    vpnDirLocation = CERT_DIR_CONTAINER + team_id
-    result = await get_user(team_id, user_id, vpnDirLocation)
-    result = str(result).replace("\\n", "\n")
-    return result
 
 
 # FIXME: I am unused! Probably will be used when team deletion is implemented.
