@@ -82,10 +82,16 @@ async def start_challenge_request():
         f"Received start challenge request for challenge {request_data.challenge_id}"
         + f" from {request_data.team_id}"
     )
-    status = await start_challenge(request_data.team_id, request_data.challenge_id)
-    if status == 0:
-        status = "successfully created challenge"
-    return str(status), 200
+
+    try:
+        await start_challenge(request_data.team_id, request_data.challenge_id)
+    except ValueError:
+        return "challenge not found", 404
+    except Exception as e:
+        logger.error(f"Unexpected error starting challenge: {e}")
+        return "error starting challenge", 500
+
+    return "successfully started challenge", 200
 
 
 @app.route("/stop_challenge", methods=["POST", "GET"])
@@ -119,7 +125,11 @@ async def get_pods_namespace_request():
         return "Invalid request data", 400
 
     logger.info(f"Getting pods for team {request_data.team_id}")
-    podresult = await get_pods_namespace(str(request_data.team_id), False)
+    try:
+        podresult = await get_pods_namespace(str(request_data.team_id), False)
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving pods: {e}")
+        return "error retrieving pods", 500
     logger.debug(f"Pods for team {request_data.team_id}:\n{podresult}")
     return podresult
 
@@ -132,14 +142,18 @@ async def getuser():
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
 
-    config = get_user(
-        request_data.team_id, request_data.user_id, CERT_DIR_CONTAINER + request_data.team_id
-    )
-
-    if config is None:
+    try:
+        config = get_user(
+            request_data.team_id, request_data.user_id, CERT_DIR_CONTAINER + request_data.team_id
+        )
+    except ValueError:
+        logger.info(f"User {request_data.user_id} has no certificate yet.")
         return "user not found", 404
-    else:
-        return config, 200, {"Content-Type": "text/plain"}
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving user: {e}")
+        return "error retrieving user", 500
+    
+    return config, 200, {"Content-Type": "text/plain"}
 
 
 @app.route("/autogenerate", methods=["POST", "GET"])

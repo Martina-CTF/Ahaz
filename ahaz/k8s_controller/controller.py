@@ -7,8 +7,9 @@ import traceback
 from pathlib import Path
 
 import redis.asyncio as aioredis
-from ahaz_common.task import AccessEnum, PodInformation
 from cryptography.hazmat.primitives import serialization
+from ahaz_common.task import AccessEnum, PodInformation, Task
+from ahaz_common.util import adapt_limit_size
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -64,10 +65,11 @@ from .crypto.manager import (
 )
 from .db.operator import (
     get_certificate_by_common_name,
-    get_only_certificate_by_common_name,
+    get_pem_by_common_name,
     get_task_definition,
 )
-from .util.container import adapt_limit_size, get_image_name
+from .util.container import get_image_name
+from .util.misc import str_to_bool
 
 # This file has `#type: ignore` comments to ignore type checking errors from the kubernetes client library,
 # which has weird/bad type annotations.
@@ -78,7 +80,7 @@ logger = logging.getLogger()
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 K8S_IMAGEPULLSECRET_NAMESPACE = os.getenv("K8S_IMAGEPULLSECRET_NAMESPACE", "default")
 K8S_IMAGEPULLSECRET_NAME = os.getenv("K8S_IMAGEPULLSECRET_NAME", "regcred")
-CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certdir")
+CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
 OVPN_IMAGE = os.getenv("OVPN_IMAGE", "lisenet/openvpn")
 OVPN_TAG = os.getenv("OVPN_TAG", "latest")
 
@@ -270,10 +272,13 @@ async def start_challenge(team_name: str, task_name: str) -> None:
                 version,
             )
 
-        await create_challenge_network_policies(team_name, task_name)
+        await create_challenge_network_policies(task, team_name)
     except ApiException as e:
         if e.status != 403:
             logger.error(f"API Exception when starting challenge: {e}")
+        raise e
+    except ValueError as e:
+        logger.error(f"ValueError when starting challenge: {e}")
         raise e
 
 
@@ -297,7 +302,7 @@ async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[
 
         # Test if pod is visible
         if "visible" in pod.metadata.labels:
-            pod_visible = bool(pod.metadata.labels["visible"])
+            pod_visible = str_to_bool(pod.metadata.labels["visible"])
         else:
             if pod.metadata.name != "vpn-container-pod":
                 logger.warning(
@@ -445,27 +450,25 @@ def create_network_policy_allow_task(
 
 
 @retry(**retry_opts)
-async def create_challenge_network_policies(team_id: str, task_name: str) -> None:
+async def create_challenge_network_policies(task: Task, team_id: str) -> None:
     load_kube_config()
     try:
         net_api = NetworkingV1Api()
-        deny_policy = create_network_policy_deny_all_task(task_name)
+        deny_policy = create_network_policy_deny_all_task(task.name)
         net_api.create_namespaced_network_policy(namespace=team_id, body=deny_policy)
 
-        task = await get_task_definition(task_name)
-
         for network in task.networks:
-            network_pods = [x.name for x in task.pods if network in x.networks]
+            network_pods = [x.name for x in task.pods if network.name in x.networks]
 
             if AccessEnum.player in network.access:  # if it is teamnet, include the vpn pod in whitelist
                 network_pods.append("vpn-container-pod")
 
-            allow_policy = create_network_policy_allow_task(task_name, network_pods, network.name)
+            allow_policy = create_network_policy_allow_task(task.name, network_pods, network.name)
             net_api.create_namespaced_network_policy(namespace=team_id, body=allow_policy)
 
     except ApiException as e:
         if e.status != 403:
-            logger.error(f"API Exception when creating challenge network policies for {task_name}: {e}")
+            logger.error(f"API Exception when creating challenge network policies for {task.name}: {e}")
         raise e
 
 
@@ -625,16 +628,21 @@ def create_team_namespace(team_id: str) -> None:
 
 
 @retry(**retry_opts)
-async def create_team_vpn_configmap(team_id) -> None:
+async def create_team_vpn_configmap(team_id: str) -> None:
     load_kube_config()
     try:
         core_api = CoreV1Api()
         teamCertDir = CERT_DIR_CONTAINER + team_id
 
         ovpn_config = get_server_ovpn_config(teamCertDir)
-        server_key = get_server_key(teamCertDir)
-        server_cert = get_server_cert(teamCertDir)
-        server_ca = get_server_ca(teamCertDir)
+        
+        try:
+            server = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
+            ca = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+        except ValueError as e:
+            logger.error(f"Error retrieving certificates for team {team_id}: {e}")
+            raise e
+
         server_ta = get_server_ta(teamCertDir)
         ovpn_env = get_openvpn_env(teamCertDir)
 
@@ -649,13 +657,9 @@ async def create_team_vpn_configmap(team_id) -> None:
             metadata=V1ObjectMeta(name=f"{team_id}-vpn-config"),
             data={
                 "ovpn.conf": ovpn_config,
-                "server.key": server_key.private_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=serialization.NoEncryption(),
-                ).decode(),
-                "server.crt": server_cert.public_bytes(encoding=serialization.Encoding.PEM).decode(),
-                "ca.crt": server_ca.public_bytes(encoding=serialization.Encoding.PEM).decode(),
+                "server.key": server.get_private_key_pem(),
+                "server.crt": server.get_certificate_pem(),
+                "ca.crt": ca,
                 "ta.key": server_ta,
                 "ovpn.env": ovpn_env,
                 "up.sh": up_script,
@@ -804,17 +808,10 @@ def expose_team_vpn_container(team_id: str, port: int) -> None:
 
 def register_user_ovpn(teamname: str, username: str) -> str:
     cert_dir = CERT_DIR_CONTAINER + teamname
-    result = generate_user(teamname, username, cert_dir)
+    generate_user(teamname, username, cert_dir)
     # TODO: change
     # dboperator.insert_user_vpn_config(teamname, username, result)
     return "successfully registered"
-
-
-def obtain_user_ovpn_config(teamname: str, username: str) -> str:
-    vpnDirLocation = CERT_DIR_CONTAINER + teamname
-    result = get_user(teamname, username, vpnDirLocation)
-    result = str(result).replace("\\n", "\n")
-    return result
 
 
 # FIXME: I am unused! Probably will be used when team deletion is implemented.
@@ -912,7 +909,7 @@ async def k8s_watcher(redis_client: aioredis.Redis) -> None:
                 "pod_namespace": pod_namespace,
                 "pod_status": pod_status,
                 "pod_ip": pod_ip,
-                "visible": bool(pod_labels.get("visible", False)),
+                "visible": str_to_bool(pod_labels.get("visible", "False")),
                 "challenge": challenge_name,
             }
 

@@ -7,15 +7,28 @@ from pymongo import AsyncMongoClient
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
 
+from ..util.misc import str_to_bool
 from .models.certificate import CertificateDoc
 from .models.deployment import TaskDeploymentDoc
 from .models.task import TaskDoc
 from .models.team import TeamDoc
 
-DB_IP = getenv("DB_IP", "10.33.0.3")
+DB_IP = getenv("DB_IP", None)
+if DB_IP is None:
+    raise ValueError("DB_IP environment variable is not set")
 DB_DBNAME = getenv("DB_DBNAME", "ahaz")
-DB_USERNAME = getenv("DB_USERNAME", "dbeaver")
-DB_PASSWORD = getenv("DB_PASSWORD", "dbeaver")
+DB_USERNAME = getenv("DB_USERNAME", "mongodb")
+DB_PASSWORD = getenv("DB_PASSWORD", "I_LOVE_NOSQL!!!")
+
+DB_TLS_ENABLED = str_to_bool(getenv("DB_TLS_ENABLED", "false"))
+DB_TLS_CA_FILE = getenv("DB_TLS_CA_FILE", None)
+DB_TLS_CLIENT_CERT = getenv("DB_TLS_CLIENT_CERT", None)
+DB_TLS_INSECURE = getenv("DB_TLS_INSECURE", None)
+if DB_TLS_INSECURE is not None:
+    DB_TLS_INSECURE = str_to_bool(DB_TLS_INSECURE)
+
+if DB_TLS_ENABLED and (DB_TLS_CA_FILE is None and bool(DB_TLS_INSECURE) is False):
+    raise ValueError("DB_TLS_ENABLED is true, but no CA file is provided and DB_TLS_INSECURE is false")
 
 # Shut up MongoDB driver logging
 logging.getLogger("pymongo").setLevel(logging.WARNING)
@@ -73,11 +86,20 @@ async def get_context() -> MongoContext:
     loop = asyncio.get_running_loop()
 
     if loop not in contexts:
+        tlsKwargs = {}
+        if DB_TLS_ENABLED:
+            tlsKwargs = {
+                "tlsCAFile": DB_TLS_CA_FILE,
+                "tlsCertificateKeyFile": DB_TLS_CLIENT_CERT,
+                "tlsAllowInvalidCertificates": bool(DB_TLS_INSECURE),
+            }
+
         client = AsyncMongoClient(
             host=DB_IP,
             username=DB_USERNAME,
             password=DB_PASSWORD,
-            tls=False,  # TODO: Add TLS support in env vars
+            tls=DB_TLS_ENABLED,
+            **tlsKwargs,
         )
         db = client[DB_DBNAME]
 
