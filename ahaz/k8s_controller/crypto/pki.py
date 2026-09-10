@@ -1,10 +1,6 @@
 import datetime
 import logging
 import os
-from pathlib import Path
-
-from cryptography import x509
-from cryptography.hazmat.primitives.asymmetric.types import CertificateIssuerPrivateKeyTypes
 
 from ..db.models.certificate import Certificate
 from ..db.operator import get_certificate_by_common_name, insert_certificate
@@ -13,27 +9,11 @@ from .certificates import (
     create_signed_certificate,
     generate_key,
 )
-from .fs import read_certificate, read_keypair, read_private_key, write_certificate, write_keypair
 
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certdir")
 
 logger = logging.getLogger()
-
-
-def get_team_pki_dir(team_id: str) -> Path:
-    directory = Path(CERT_DIR_CONTAINER) / team_id / "pki"
-
-    if not directory.exists():
-        logger.info(f"PKI for team {team_id} has not yet been initialized. Initializing...")
-
-        os.makedirs(directory / "private", mode=0o700)
-        os.makedirs(directory / "issued")
-        os.makedirs(directory / "archive")
-
-        (directory / "revoked.crl").touch()  # Create empty CRL file
-
-    return directory
 
 
 # TODO: The PKI state changes here! Handle accordingly.
@@ -94,34 +74,3 @@ async def mint_certificate(
     await insert_certificate(cert_data)
 
     return cert_data
-
-
-def generate_tls_auth_key(team_id: str) -> str:
-    directory = get_team_pki_dir(team_id)
-
-    secret = os.urandom(256)  # 2048-bit random key
-
-    secret_hex = secret.hex()
-    # Split the hex string into lines of 64 characters for better readability
-    formatted_secret = "\n".join([secret_hex[i : i + 64] for i in range(0, len(secret_hex), 64)])
-
-    # Generate static key file content
-    armoured_key_content = (
-        f"-----BEGIN OpenVPN Static key V1-----\n{formatted_secret}\n-----END OpenVPN Static key V1-----\n"
-    )
-
-    with open(directory / "ta.key", "wb") as f:
-        f.write(armoured_key_content.encode())
-
-    return armoured_key_content
-
-
-def get_tls_auth_key(team_id: str) -> str:
-    directory = get_team_pki_dir(team_id)
-
-    if not (directory / "ta.key").exists():
-        logger.info(f"No TLS auth key found for team {team_id}, creating...")
-        return generate_tls_auth_key(team_id)
-    else:
-        with open(directory / "ta.key", "r") as f:
-            return f.read()
