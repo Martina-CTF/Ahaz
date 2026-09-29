@@ -37,6 +37,28 @@ async def get_task_definition(name: str) -> Task:
 
     return Task.model_validate(task)
 
+async def task_definition_exists(name: str) -> bool:
+    database = await get_context()
+
+    task: TaskDoc | None = await database.collections.task_definitions.find_one({"name": name})
+
+    return task is not None
+
+async def delete_task_definition(name: str) -> None:
+    database = await get_context()
+
+    result = await database.collections.task_definitions.delete_one({"name": name})
+
+    if result.deleted_count == 0:
+        raise ValueError("challenge not found in db")
+
+    return
+
+
+async def list_teams() -> list[str]:
+    database = await get_context()
+
+    return await database.collections.teams.distinct("team_id")
 
 async def set_team(team: Team) -> None:
     database = await get_context()
@@ -60,6 +82,27 @@ async def get_team(team_id: str) -> Team:
 
     return Team.model_validate(team_range)
 
+async def team_exists(team_id: str) -> bool:
+    database = await get_context()
+
+    team_range: TeamDoc | None = await database.collections.teams.find_one({"team_id": team_id})
+
+    return team_range is not None
+
+async def delete_team(team_id: str) -> None:
+    database = await get_context()
+
+    result = await database.collections.teams.delete_one({"team_id": team_id})
+
+    if result.deleted_count == 0:
+        raise ValueError("team not found in db")
+
+    return
+
+async def list_ports() -> list[int]:
+    database = await get_context()
+
+    return await database.collections.teams.distinct("port")
 
 async def insert_certificate(cert: Certificate) -> None:
     database = await get_context()

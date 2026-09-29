@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import traceback
+from typing import TYPE_CHECKING, TypedDict
 
 import redis.asyncio as aioredis
 from ahaz_common.task import AccessEnum, PodInformation, Task
@@ -50,6 +51,9 @@ from kubernetes.client import (
 )
 from kubernetes.client.rest import ApiException
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity.retry import retry_base
+from tenacity.stop import stop_base
+from tenacity.wait import wait_base
 
 from .certmanager import (
     generate_user,
@@ -80,7 +84,6 @@ K8S_IMAGEPULLSECRET_NAME = os.getenv("K8S_IMAGEPULLSECRET_NAME", "regcred")
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
 OVPN_IMAGE = os.getenv("OVPN_IMAGE", "lisenet/openvpn")
 OVPN_TAG = os.getenv("OVPN_TAG", "latest")
-
 
 # Quick heuristic to determine if the kube folder has a valid kubeconfig file
 # or merely a service account token.
@@ -130,7 +133,12 @@ def should_retry_patch(exception):
     )
 
 
-retry_opts = {
+class RetryOpts(TypedDict):
+    retry: retry_base
+    stop: stop_base
+    wait: wait_base
+
+retry_opts: RetryOpts = {
     "retry": retry_if_exception(should_retry_request),  # type: ignore
     "stop": stop_after_attempt(5),  # Stop after 5 attempts
     "wait": wait_exponential(multiplier=1, min=2, max=10),  # Exponential backoff
@@ -278,8 +286,14 @@ async def start_challenge(team_name: str, task_name: str) -> None:
         logger.error(f"ValueError when starting challenge: {e}")
         raise e
 
+class PodInfo(TypedDict):
+    name: str
+    status: str
+    ip: str
+    visibleIP: bool
+    task: str | None
 
-async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[dict[str, str]]:
+async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[PodInfo]:
     if pod_list is None or not pod_list.items:
         return []
 
@@ -319,7 +333,7 @@ async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[
         else:
             state = str(pod.status.phase)
 
-        pod_data = {
+        pod_data: PodInfo = {
             "status": state,
             "ip": pod.status.pod_ip,
             "visibleIP": pod_visible,
@@ -333,18 +347,18 @@ async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[
 
 
 @retry(**retry_opts)
-async def get_pods_namespace(team_name: str, show_invisible: bool) -> str:
+async def get_pods_namespace(team_name: str, show_invisible: bool) -> list[PodInfo]:
     load_kube_config()
     try:
         core_api = CoreV1Api()
         pod_list: V1PodList = core_api.list_namespaced_pod(team_name)
 
         if not pod_list.items:
-            return json.dumps([])
+            return []
 
         pod_info = await summarise_pods_list(pod_list, show_invisible)
 
-        return json.dumps(pod_info)
+        return pod_info
     except ApiException as e:
         if e.status != 403:
             logger.error(f"API Exception when getting pods in namespace {team_name}: {e}")
