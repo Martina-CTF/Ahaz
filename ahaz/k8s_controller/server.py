@@ -232,7 +232,6 @@ async def get_team_namespace(id: str):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
     show_invisible = request.args.get("show_invisible", "false").lower() == "true"
-    #FIXME: show invisible does not work
     try:
         pods = await k8s.get_pods_namespace(id, show_invisible)
         return json.dumps(pods), 200, {"Content-Type": "application/json"}
