@@ -85,6 +85,7 @@ CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
 OVPN_IMAGE = os.getenv("OVPN_IMAGE", "lisenet/openvpn")
 OVPN_TAG = os.getenv("OVPN_TAG", "latest")
 
+
 # Quick heuristic to determine if the kube folder has a valid kubeconfig file
 # or merely a service account token.
 def is_valid_kubeconfig(kube_folder: str) -> bool:
@@ -137,6 +138,7 @@ class RetryOpts(TypedDict):
     retry: retry_base
     stop: stop_base
     wait: wait_base
+
 
 retry_opts: RetryOpts = {
     "retry": retry_if_exception(should_retry_request),  # type: ignore
@@ -286,12 +288,14 @@ async def start_challenge(team_name: str, task_name: str) -> None:
         logger.error(f"ValueError when starting challenge: {e}")
         raise e
 
+
 class PodInfo(TypedDict):
     name: str
     status: str
     ip: str
     visibleIP: bool
     task: str | None
+
 
 async def summarise_pods_list(pod_list: V1PodList, showInvisible: bool) -> list[PodInfo]:
     if pod_list is None or not pod_list.items:
@@ -571,6 +575,23 @@ patch_retry_opts = {
 }
 
 
+@retry(**retry_opts)
+def check_namespace_exists(namespace: str) -> bool:
+    load_kube_config()
+    try:
+        core_api = CoreV1Api()
+        core_api.read_namespace(name=namespace)
+        return True
+    except ApiException as e:
+        if e.status == 404:
+            return False
+        elif e.status != 403:
+            logger.error(f"API Exception when checking namespace {namespace}: {e}")
+        else:
+            logger.debug(f"API Exception when checking namespace {namespace}: {e}")
+        raise e
+
+
 @retry(**patch_retry_opts)
 def patch_namespaced_service_account(
     namespace: str, service_account_name: str, body: V1ServiceAccount
@@ -646,7 +667,7 @@ async def create_team_vpn_configmap(team_id) -> None:
         teamCertDir = CERT_DIR_CONTAINER + team_id
 
         ovpn_config = get_server_ovpn_config(teamCertDir)
-        
+
         try:
             server_cert = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
             ca = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")

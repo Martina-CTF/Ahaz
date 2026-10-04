@@ -7,7 +7,9 @@ from asyncio.subprocess import Process
 from threading import Thread
 from typing import TypedDict
 
-import db.operator as db
+import k8s_controller.certmanager as cert
+import k8s_controller.controller as k8s
+import k8s_controller.db.operator as db
 import redis.asyncio as aioredis
 import uvicorn
 from ahaz_common.task import Task
@@ -15,10 +17,7 @@ from k8s_controller.db.collections import init_db
 from pydantic import ValidationError
 from quart import Quart, Response, make_response, request
 
-from .controller import (
-    get_pods_namespace,
-    k8s_watcher,
-)
+from .controller import PodInfo
 from .work import Work, WorkQueue
 
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
@@ -49,30 +48,18 @@ def ping():
     return "pong", 200, {"Content-Type": "text/plain"}
 
 
-# # HACK: Test function to add a task definition to the DB
-# @app.route("/task", methods=["POST"])
-# async def create_task():
-#     try:
-#         request_data = Task(**await request.get_json())
-#     except ValidationError as e:
-#         logger.error(f"Validation error: {e}")
-#         return "Invalid request data", 400
-
-#     await insert_task_definition(request_data)
-#     return "Task created successfully", 201
-
 @app.route("/task", methods=["GET"])
 async def get_tasks():
     tasks = await db.list_challenges()
     return json.dumps(tasks), 200, {"Content-Type": "application/json"}
 
+
 @app.route("/task/<string:id>", methods=["GET"])
 async def get_task(id: str):
-    try:
-        task = await db.get_task_definition(id)
-    except ValueError:
+    task = await db.get_task_definition(id)
+    if task is None:
         return {"error": "Task not found"}, 404, {"Content-Type": "application/json"}
-    
+
     return task.model_dump_json(), 200, {"Content-Type": "application/json"}
 
 
@@ -87,9 +74,8 @@ async def update_task(id: str):
         logger.error(f"Value error: {e}")
         return {"error": str(e)}, 400, {"Content-Type": "application/json"}
 
-    if await db.task_definition_exists(id):
-        existing_task = await db.get_task_definition(id)
-        if existing_task.model_dump_json() == task.model_dump_json():
+    existing_task = await db.get_task_definition(id)
+    if existing_task is not None and existing_task.model_dump_json() == task.model_dump_json():
             return existing_task.model_dump_json(), 200, {"Content-Type": "application/json"}
 
     await db.insert_task_definition(task)
@@ -97,43 +83,71 @@ async def update_task(id: str):
 
     return task.model_dump_json(), 201, {"Content-Type": "application/json"}
 
+
 @app.route("/task/<string:id>", methods=["DELETE"])
 async def delete_task(id: str):
-    try:
-        await db.delete_task_definition(id)
-    except ValueError:
+    if not await db.delete_task_definition(id):
         return {"error": "Task not found"}, 404, {"Content-Type": "application/json"}
 
     return Response(None, status=204)
+
 
 @app.route("/team", methods=["GET"])
 async def get_teams():
     teams = await db.list_teams()
     return json.dumps(teams), 200, {"Content-Type": "application/json"}
 
+
+async def get_user_raw(team_id: str, user_id: str) -> str | None:
+    # TODO: waiting on cert PR
+    user_cert = await cert.get_user(team_id, user_id, CERT_DIR_CONTAINER + team_id)
+    if user_cert is None:
+        return None
+
+    return json.dumps({"id": user_id, "vpn_status": "active", "vpn_config": user_cert})
+
+
+async def get_team_raw(team_id: str) -> str | None:
+    team = await db.get_team(team_id)
+    if team is None:
+        return None
+
+    namespace_status = "none"
+    if k8s.check_namespace_exists(team_id):
+        namespace_status = "exists"
+
+    # TODO: check for VPN container and VPN certs, once #420 finishes the PR
+
+    team_dict = team.model_dump()
+    team_dict["namespace_status"] = namespace_status
+    team_dict["users"] = []
+
+    return json.dumps(team_dict)
+
+
 @app.route("/team/<string:id>", methods=["GET"])
 async def get_team(id: str):
-    try:
-        team = await db.get_team(id)
-    except ValueError:
+    team = await db.get_team(id)
+    if team is None:
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
-    
+
     return team.model_dump_json(), 200, {"Content-Type": "application/json"}
+
 
 @app.route("/team/<string:id>", methods=["PUT"])
 async def update_team(id: str):
-    try:
-        team = await db.get_team(id)
-        return team.model_dump_json(), 200, {"Content-Type": "application/json"}
-    except ValueError:
-        pass
+    logger.debug("getting team")
+    team_raw = await get_team_raw(id)
+    if team_raw is not None:
+        return team_raw, 200, {"Content-Type": "application/json"}
 
+    logger.debug("getting ports")
     # Get unused port
     used_ports = await db.list_ports()
-    random.shuffle(used_ports) # God help me if a port collision actually happens.
+    random.shuffle(used_ports)  # God help me if a port collision actually happens.
 
     port = None
-    
+
     if len(used_ports) == 0:
         port = TEAM_PORT_RANGE_START
     else:
@@ -150,19 +164,67 @@ async def update_team(id: str):
     if port is None:
         return {"error": "No available ports"}, 500, {"Content-Type": "application/json"}
 
+    logger.debug("inserting team")
     team = db.Team(team_id=id, port=port)
     await db.set_team(team)
 
-    # TODO: enqueue work to create namespace, vpn container, expose it, etc.
+    logger.debug("enqueuing tasks")
+    work_ids = await work_queue.enqueue_many(
+        [
+            Work(
+                id="gen_cert",
+                type="gen_cert",
+                payload={
+                    "team_id": team.team_id,
+                    "port": port,
+                    "public_domainname": PUBLIC_DOMAINNAME,
+                    "certdir": CERT_DIR_CONTAINER,
+                },
+                idempotent_on={"team_id": team.team_id},
+            ),
+            Work(
+                id="create_namespace",
+                type="create_namespace",
+                payload={"team_id": team.team_id},
+                idempotent_on={"team_id": team.team_id},
+            ),
+            Work(
+                id="create_vpn_container",
+                type="create_vpn_container",
+                payload={"team_id": team.team_id},
+                idempotent_on={"team_id": team.team_id},
+                deps=["gen_cert", "create_namespace"],
+            ),
+            Work(
+                id="expose_vpn_container",
+                type="expose_vpn_container",
+                payload={"team_id": team.team_id, "port": port},
+                idempotent_on={"team_id": team.team_id},
+                deps=["create_vpn_container"],
+            ),
+            Work(
+                id="insert_db",
+                type="insert_db",
+                payload={"team_id": team.team_id, "port": port},
+                idempotent_on={"team_id": team.team_id},
+            ),
+        ]
+    )
 
-    return {"message": "Team created successfully"}, 201, {"Content-Type": "application/json"}
+    logger.debug(f"Enqueued tasks for team {team.team_id}: {work_ids}")
+
+    return await get_team_raw(team.team_id), 201, {"Content-Type": "application/json"}
+
 
 @app.route("/team/<string:id>", methods=["DELETE"])
 async def delete_team(id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
-    # TODO: delete team namespace, vpn container, and then remove from DB
+
+    # TODO: delete namespace, VPN container, and VPN certs
+
     return {"error": "Not implemented"}, 501, {"Content-Type": "application/json"}
+
 
 @app.route("/team/<string:id>/namespace", methods=["GET"])
 async def get_team_namespace(id: str):
@@ -170,216 +232,127 @@ async def get_team_namespace(id: str):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
     show_invisible = request.args.get("show_invisible", "false").lower() == "true"
-
+    #FIXME: show invisible does not work
     try:
-        pods = await get_pods_namespace(id, show_invisible)
+        pods = await k8s.get_pods_namespace(id, show_invisible)
         return json.dumps(pods), 200, {"Content-Type": "application/json"}
     except Exception as e:
         logger.error(f"Unexpected error retrieving pods for team {id}: {e}")
         return {"error": "Error retrieving pods"}, 500, {"Content-Type": "application/json"}
 
-@app.route("/team/<string:id>/namespace/<string:task_id>", methods=["PUT"])
-async def start_challenge(id: str, task_id: str):
-    if not await db.team_exists(id):
+def filter_pods_by_task(pods: list[PodInfo], task: str) -> dict:
+    pods_filtered = [
+        {"name": pod["name"], "status": pod["status"], "ip": pod["ip"], "visible": pod["visibleIP"]}
+        for pod in pods
+        if pod["task"] == task and pod["status"] != "Terminated"
+    ]
+
+    return {
+        "task": task,
+        "status": "available"
+        if len([pod for pod in pods_filtered if pod["status"] != "Running"]) == 0
+        else "unavailable",
+        "pods": pods_filtered,
+    }
+
+@app.route("/team/<string:team>/namespace/<string:task>", methods=["PUT"])
+async def start_challenge(team: str, task: str):
+    if not await db.team_exists(team):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    return {"message": "Not implemented"}, 501, {"Content-Type": "application/json"}
+    if not await db.task_definition_exists(task):
+        return {"error": "Task not found"}, 404, {"Content-Type": "application/json"}
 
-@app.route("/team/<string:id>/namespace/<string:task_id>", methods=["DELETE"])
-async def stop_task(id: str, task_id: str):
-    if not await db.team_exists(id):
+    if not k8s.check_namespace_exists(team):
+        return {"error": "Team namespace does not exist"}, 400, {"Content-Type": "application/json"}
+
+    pods: list[PodInfo] = await k8s.get_pods_namespace(team, True)
+    pods_filtered = filter_pods_by_task(pods, task)
+
+    if len(pods_filtered["pods"]) > 0:
+        return json.dumps(pods_filtered), 200, {"Content-Type": "application/json"}
+
+    work_id = await work_queue.enqueue(Work(id="start_challenge", type="start_challenge", payload={"team_id": team, "task": task}))
+    logger.debug(f"Enqueued start_challenge for team {team} and task {task}: {work_id}")
+
+    return json.dumps({"task": task, "status": "starting"}), 202, {"Content-Type": "application/json"}
+    
+
+@app.route("/team/<string:team>/namespace/<string:task>", methods=["DELETE"])
+async def stop_task(team: str, task: str):
+    if not await db.team_exists(team):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    return {"message": "Not implemented"}, 501, {"Content-Type": "application/json"}
+    if not await db.task_definition_exists(task):
+        return {"error": "Task not found"}, 404, {"Content-Type": "application/json"}
+
+    if not k8s.check_namespace_exists(team):
+        return {"error": "Team namespace does not exist"}, 400, {"Content-Type": "application/json"}
+
+    work_id = await work_queue.enqueue(Work(id="stop_challenge", type="stop_challenge", payload={"team_id": team, "task": task}))
+    logger.debug(f"Enqueued stop_challenge for team {team} and task {task}: {work_id}")
+
+    pods = filter_pods_by_task(await k8s.get_pods_namespace(team, True), task)
+    
+    return json.dumps(pods), 202, {"Content-Type": "application/json"}
+
 
 @app.route("/team/<string:id>/user", methods=["GET"])
 async def get_team_users(id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
+    # TODO: implement when #8 is merged
     return {"message": "Not implemented"}, 501, {"Content-Type": "application/json"}
+
 
 @app.route("/team/<string:id>/user/<string:user_id>", methods=["GET"])
 async def get_user(id: str, user_id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    return {"message": "Not implemented"}, 501, {"Content-Type": "application/json"}
+    status = await get_user_raw(id, user_id)
+    if status is None:
+        return {"error": "User not found"}, 404, {"Content-Type": "application/json"}
+
+    return status, 200, {"Content-Type": "application/json"}
 
 @app.route("/team/<string:id>/user/<string:user_id>", methods=["PUT"])
 async def create_user(id: str, user_id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    return {"message": "Not implemented"}, 501, {"Content-Type": "application/json"}
+    code = 200
+
+    status = await get_user_raw(id, user_id)
+    if status is None:
+        code = 202
+        work_id = await work_queue.enqueue(Work(id="register_user", type="register_user", payload={"team_id": id, "user_id": user_id}))
+        logger.debug(f"Enqueued register_user for team {id} and user {user_id}: {work_id}")
+
+        status = await get_user_raw(id, user_id)
+        if status is None:
+            status = json.dumps({"id": user_id, "vpn_status": "registering", "vpn_config": None})
+
+
+    return json.dumps(status), code, {"Content-Type": "application/json"}
 
 @app.route("/team/<string:id>/user/<string:user_id>", methods=["PATCH"])
 async def update_user(id: str, user_id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
+    # TODO: implement when #8 is merged
     return {"message": "Not implemented"}, 501, {"Content-Type": "application/json"}
+
 
 @app.route("/team/<string:id>/user/<string:user_id>", methods=["DELETE"])
 async def delete_user(id: str, user_id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
+    # TODO: implement when #8 is merged
     return {"message": "Not implemented"}, 501, {"Content-Type": "application/json"}
-
-# @app.route("/start_challenge", methods=["POST", "GET"])
-# async def start_challenge_request():
-#     try:
-#         request_data = ChallengeRequest(**await request.get_json())
-#     except ValidationError as e:
-#         logger.error(f"Validation error: {e}")
-#         return "Invalid request data", 400
-
-#     logger.info(
-#         f"Received start challenge request for challenge {request_data.challenge_id}"
-#         + f" from {request_data.team_id}"
-#     )
-
-#     try:
-#         await start_challenge(request_data.team_id, request_data.challenge_id)
-#     except ValueError:
-#         return "challenge not found", 404
-#     except Exception as e:
-#         logger.error(f"Unexpected error starting challenge: {e}")
-#         return "error starting challenge", 500
-
-#     return "successfully started challenge", 200
-
-
-# @app.route("/stop_challenge", methods=["POST", "GET"])
-# async def stop_challenge_request():
-#     try:
-#         request_data = ChallengeRequest(**await request.get_json())
-#     except ValidationError as e:
-#         logger.error(f"Validation error: {e}")
-#         return "Invalid request data", 400
-
-#     logger.info(
-#         f"Received stop challenge request for challenge {request_data.challenge_id}"
-#         + f" from {request_data.team_id}"
-#     )
-#     status = stop_challenge(request_data.team_id, request_data.challenge_id)
-#     return status
-
-
-# @app.route("/get_challenges", methods=["GET"])
-# async def get_challenges():
-#     task_list = await list_challenges()
-#     return json.dumps([{"challengename": challenge} for challenge in task_list])  # TODO: the fuck?
-
-
-# @app.route("/get_pods_namespace", methods=["GET"])
-# async def get_pods_namespace_request():
-#     try:
-#         request_data = TeamRequest(**await request.get_json())
-#     except ValidationError as e:
-#         logger.error(f"Validation error: {e}")
-#         return "Invalid request data", 400
-
-#     logger.info(f"Getting pods for team {request_data.team_id}")
-#     try:
-#         podresult = await get_pods_namespace(str(request_data.team_id), False)
-#     except Exception as e:
-#         logger.error(f"Unexpected error retrieving pods: {e}")
-#         return "error retrieving pods", 500
-#     logger.debug(f"Pods for team {request_data.team_id}:\n{podresult}")
-#     return podresult
-
-
-# @app.route("/get_user", methods=["GET"])
-# async def getuser():
-#     try:
-#         request_data = UserRequest(**await request.get_json())
-#     except ValidationError as e:
-#         logger.error(f"Validation error: {e}")
-#         return "Invalid request data", 400
-    
-#     try:
-#         config = await get_user(
-#             request_data.team_id, request_data.user_id, CERT_DIR_CONTAINER + request_data.team_id
-#         )
-#     except ValueError:
-#         logger.info(f"User {request_data.user_id} has no certificate yet.")
-#         return "user not found", 404
-#     except Exception as e:
-#         logger.error(f"Unexpected error retrieving user: {e}")
-#         return "error retrieving user", 500
-    
-#     return config, 200, {"Content-Type": "text/plain"}
-
-
-# @app.route("/autogenerate", methods=["POST", "GET"])
-# async def autogenerate():
-#     try:
-#         request_data = UserRequest(**await request.get_json())
-#     except ValidationError as e:
-#         logger.error(f"Validation error: {e}")
-#         return "Invalid request data", 400
-
-#     try:
-#         port = (
-#             TEAM_PORT_RANGE_START + int(request_data.team_id)  # HACK: GOD PLEASE HAVE GOOD INPUTS ONLY
-#         )
-#     except Exception as e:
-#         logger.error(f"Invalid team_id for port calculation: {request_data.team_id}")
-#         logger.error(e)
-#         port = TEAM_PORT_RANGE_START
-
-#     enqueued_ids = await work_queue.enqueue_many(
-#         [
-#             Work(
-#                 id="gen_cert",
-#                 type="gen_cert",
-#                 payload={
-#                     "team_id": request_data.team_id,
-#                     "port": port,
-#                     "public_domainname": PUBLIC_DOMAINNAME,
-#                     "certdir": CERT_DIR_CONTAINER,
-#                 },
-#                 idempotent_on={"team_id": request_data.team_id},
-#             ),
-#             Work(
-#                 id="create_namespace",
-#                 type="create_namespace",
-#                 payload={"team_id": request_data.team_id},
-#                 idempotent_on={"team_id": request_data.team_id},
-#             ),
-#             Work(
-#                 id="create_vpn_container",
-#                 type="create_vpn_container",
-#                 payload={"team_id": request_data.team_id},
-#                 idempotent_on={"team_id": request_data.team_id},
-#                 deps=["gen_cert", "create_namespace"],
-#             ),
-#             Work(
-#                 id="expose_vpn_container",
-#                 type="expose_vpn_container",
-#                 payload={"team_id": request_data.team_id, "port": port},
-#                 idempotent_on={"team_id": request_data.team_id},
-#                 deps=["create_vpn_container"],
-#             ),
-#             Work(
-#                 id="insert_db",
-#                 type="insert_db",
-#                 payload={"team_id": request_data.team_id, "port": port},
-#                 idempotent_on={"team_id": request_data.team_id},
-#             ),
-#             Work(
-#                 id="register_user",
-#                 type="register_user",
-#                 payload={"team_id": request_data.team_id, "user_id": request_data.user_id},
-#                 idempotent_on={"team_id": request_data.team_id, "user_id": request_data.user_id},
-#                 deps=["gen_cert"],
-#             ),
-#         ]
-#     )
-
-#     return json.dumps({"status": "enqueued", "tasks": [id for id in enqueued_ids]}), 200
 
 
 @app.route("/events", methods=["GET"])
@@ -434,7 +407,6 @@ async def startup():
     await init_db()
 
 
-
 async def worker_service(worker_count: int):
     class WorkerProcess(TypedDict):
         type: str
@@ -481,7 +453,7 @@ def main():
 
     # Dedicated thread for Kubernetes watcher
     Thread(
-        target=lambda: asyncio.new_event_loop().run_until_complete(k8s_watcher(redis_client)),
+        target=lambda: asyncio.new_event_loop().run_until_complete(k8s.k8s_watcher(redis_client)),
         daemon=True,
     ).start()
 

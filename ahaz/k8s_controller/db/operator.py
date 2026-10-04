@@ -27,15 +27,16 @@ async def insert_task_definition(task: Task) -> None:
     await database.collections.task_definitions.insert_one(task_doc)
 
 
-async def get_task_definition(name: str) -> Task:
+async def get_task_definition(name: str) -> Task | None:
     database = await get_context()
 
     task: TaskDoc | None = await database.collections.task_definitions.find_one({"name": name})
 
     if task is None:
-        raise ValueError("challenge not found in db")
+        return None
 
     return Task.model_validate(task)
+
 
 async def task_definition_exists(name: str) -> bool:
     database = await get_context()
@@ -44,21 +45,23 @@ async def task_definition_exists(name: str) -> bool:
 
     return task is not None
 
-async def delete_task_definition(name: str) -> None:
+
+async def delete_task_definition(name: str) -> bool:
     database = await get_context()
 
     result = await database.collections.task_definitions.delete_one({"name": name})
 
     if result.deleted_count == 0:
-        raise ValueError("challenge not found in db")
+        return False
 
-    return
+    return True
 
 
 async def list_teams() -> list[str]:
     database = await get_context()
 
     return await database.collections.teams.distinct("team_id")
+
 
 async def set_team(team: Team) -> None:
     database = await get_context()
@@ -72,15 +75,16 @@ async def set_team(team: Team) -> None:
     )
 
 
-async def get_team(team_id: str) -> Team:
+async def get_team(team_id: str) -> Team | None:
     database = await get_context()
 
     team_range: TeamDoc | None = await database.collections.teams.find_one({"team_id": team_id})
 
     if team_range is None:
-        raise ValueError("range not found for team")
+        return None
 
     return Team.model_validate(team_range)
+
 
 async def team_exists(team_id: str) -> bool:
     database = await get_context()
@@ -89,20 +93,23 @@ async def team_exists(team_id: str) -> bool:
 
     return team_range is not None
 
-async def delete_team(team_id: str) -> None:
+
+async def delete_team(team_id: str) -> bool:
     database = await get_context()
 
     result = await database.collections.teams.delete_one({"team_id": team_id})
 
     if result.deleted_count == 0:
-        raise ValueError("team not found in db")
+        return False
 
-    return
+    return True
+
 
 async def list_ports() -> list[int]:
     database = await get_context()
 
     return await database.collections.teams.distinct("port")
+
 
 async def insert_certificate(cert: Certificate) -> None:
     database = await get_context()
@@ -112,7 +119,7 @@ async def insert_certificate(cert: Certificate) -> None:
     await database.collections.certificates.insert_one(cert_doc)
 
 
-async def get_certificate(serial_number: int) -> Certificate:
+async def get_certificate(serial_number: int) -> Certificate | None:
     database = await get_context()
 
     cert_doc: CertificateDoc | None = await database.collections.certificates.find_one(
@@ -120,12 +127,12 @@ async def get_certificate(serial_number: int) -> Certificate:
     )
 
     if cert_doc is None:
-        raise ValueError("certificate not found in db")
+        return None
 
     return Certificate.from_doc(cert_doc)
 
 
-async def get_certificate_by_common_name(common_name: str) -> Certificate:
+async def get_certificate_by_common_name(common_name: str) -> Certificate | None:
     database = await get_context()
 
     # Find newest certificate with the given common name
@@ -134,12 +141,12 @@ async def get_certificate_by_common_name(common_name: str) -> Certificate:
     )
 
     if cert_doc is None:
-        raise ValueError("certificate not found in db")
+        return None
 
     return Certificate.from_doc(cert_doc)
 
 
-async def get_pem_by_common_name(common_name: str) -> str:
+async def get_pem_by_common_name(common_name: str) -> str | None:
     database = await get_context()
 
     certificate_bytes = await database.collections.certificates.find_one(
@@ -147,6 +154,6 @@ async def get_pem_by_common_name(common_name: str) -> str:
     )
 
     if certificate_bytes is None:
-        raise ValueError("certificate not found in db")
+        return None
 
     return extract_public_cert(certificate_bytes)

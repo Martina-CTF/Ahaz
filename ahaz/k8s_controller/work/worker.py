@@ -44,6 +44,10 @@ async def do_work(work_type: str, payload: dict[str, Any]) -> None:
             await tasks.insert_db(payload["team_id"], payload["port"])
         case "register_user":
             await tasks.register_user(payload["team_id"], payload["user_id"])
+        case "start_challenge":
+            await tasks.start_challenge(payload["team_id"], payload["task"])
+        case "stop_challenge":
+            tasks.stop_challenge(payload["team_id"], payload["task"])
         case _:
             raise Exception(f"Unknown work type: {work_type}")
 

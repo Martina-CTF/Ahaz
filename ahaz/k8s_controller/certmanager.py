@@ -545,13 +545,13 @@ def del_team(teamname: str, certdirlocationContainer: str) -> None:
 
 
 async def get_client_ovpn_config(
-    team_id: str, 
+    team_id: str,
     user_id: str,
     easyrsa_pki: str,
     ovpn_port: int = 1194,
     ovpn_proto: str = "tcp",
     ovpn_extra_client_config=None,
-):
+) -> str | None:
     if ovpn_extra_client_config is None:
         ovpn_extra_client_config = []
 
@@ -576,7 +576,13 @@ async def get_client_ovpn_config(
 
     try:
         client_cert = await get_certificate_by_common_name(f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}")
+        if client_cert is None:
+            logger.debug(f"Client certificate for {user_id}.{team_id}.{PUBLIC_DOMAINNAME} not found in DB")
+            return None
         ca_cert_pem = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+        if ca_cert_pem is None:
+            logger.debug(f"CA certificate for ca.{team_id}.{PUBLIC_DOMAINNAME} not found in DB")
+            return None
         ta_path = os.path.join(easyrsa_pki, "ta.key")
 
         with open(ta_path, "r") as f:
@@ -621,6 +627,8 @@ async def get_client_ovpn_config(
 async def get_team_vpn_pod_port(team_id: str) -> int:
     try:
         team_range = await get_team(team_id)
+        if team_range is None:
+            raise ValueError(f"Team {team_id} not found in DB")
         return team_range.port
     except ValueError:
         return TEAM_PORT_RANGE_START + int(team_id) - 1
@@ -664,15 +672,18 @@ async def generate_user(team_id: str, user_id: str, teamVPNDirectory: str) -> st
     )
 
     await insert_certificate(client_cert)
-    
+
     try:
-        return await get_client_ovpn_config(
+        config = await get_client_ovpn_config(
             team_id,
             user_id,
             path.join(teamVPNDirectory, "pki"),
             # HACK: make a better way of setting the port the client should connect to
             ovpn_port=await get_team_vpn_pod_port(team_id),
         )
+        if config is None:
+            raise ValueError(f"Failed to generate OpenVPN config for user {user_id} in team {team_id}")
+        return config
     except Exception as e:
         # this shouldn't happen
         # if it does, it will bubble up to the worker loop, so, snore.
@@ -686,7 +697,7 @@ async def user_exists(user_id: str, teamVPNDirectory: str) -> bool:
     return path.is_file()
 
 
-async def get_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str:
+async def get_user(team_id: str, user_id: str, teamVPNDirectory: str) -> str | None:
     try:
         return await get_client_ovpn_config(
             team_id,

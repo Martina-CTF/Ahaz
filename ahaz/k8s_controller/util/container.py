@@ -8,4 +8,3 @@ def get_image_name(image: ImageInformation) -> str:
     if image.registry:
         return f"{image.registry}/{image.name}"
     return image.name
-
