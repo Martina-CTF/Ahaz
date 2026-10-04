@@ -4,7 +4,7 @@ import logging
 import os
 import time
 import traceback
-from typing import TYPE_CHECKING, TypedDict
+from typing import TypedDict
 
 import redis.asyncio as aioredis
 from ahaz_common.task import AccessEnum, PodInformation, Task

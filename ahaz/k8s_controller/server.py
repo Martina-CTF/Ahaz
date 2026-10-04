@@ -76,7 +76,7 @@ async def update_task(id: str):
 
     existing_task = await db.get_task_definition(id)
     if existing_task is not None and existing_task.model_dump_json() == task.model_dump_json():
-            return existing_task.model_dump_json(), 200, {"Content-Type": "application/json"}
+        return existing_task.model_dump_json(), 200, {"Content-Type": "application/json"}
 
     await db.insert_task_definition(task)
     # TODO: what happens when a challenge is already running?
@@ -239,6 +239,7 @@ async def get_team_namespace(id: str):
         logger.error(f"Unexpected error retrieving pods for team {id}: {e}")
         return {"error": "Error retrieving pods"}, 500, {"Content-Type": "application/json"}
 
+
 def filter_pods_by_task(pods: list[PodInfo], task: str) -> dict:
     pods_filtered = [
         {"name": pod["name"], "status": pod["status"], "ip": pod["ip"], "visible": pod["visibleIP"]}
@@ -253,6 +254,7 @@ def filter_pods_by_task(pods: list[PodInfo], task: str) -> dict:
         else "unavailable",
         "pods": pods_filtered,
     }
+
 
 @app.route("/team/<string:team>/namespace/<string:task>", methods=["PUT"])
 async def start_challenge(team: str, task: str):
@@ -271,11 +273,13 @@ async def start_challenge(team: str, task: str):
     if len(pods_filtered["pods"]) > 0:
         return json.dumps(pods_filtered), 200, {"Content-Type": "application/json"}
 
-    work_id = await work_queue.enqueue(Work(id="start_challenge", type="start_challenge", payload={"team_id": team, "task": task}))
+    work_id = await work_queue.enqueue(
+        Work(id="start_challenge", type="start_challenge", payload={"team_id": team, "task": task})
+    )
     logger.debug(f"Enqueued start_challenge for team {team} and task {task}: {work_id}")
 
     return json.dumps({"task": task, "status": "starting"}), 202, {"Content-Type": "application/json"}
-    
+
 
 @app.route("/team/<string:team>/namespace/<string:task>", methods=["DELETE"])
 async def stop_task(team: str, task: str):
@@ -288,11 +292,13 @@ async def stop_task(team: str, task: str):
     if not k8s.check_namespace_exists(team):
         return {"error": "Team namespace does not exist"}, 400, {"Content-Type": "application/json"}
 
-    work_id = await work_queue.enqueue(Work(id="stop_challenge", type="stop_challenge", payload={"team_id": team, "task": task}))
+    work_id = await work_queue.enqueue(
+        Work(id="stop_challenge", type="stop_challenge", payload={"team_id": team, "task": task})
+    )
     logger.debug(f"Enqueued stop_challenge for team {team} and task {task}: {work_id}")
 
     pods = filter_pods_by_task(await k8s.get_pods_namespace(team, True), task)
-    
+
     return json.dumps(pods), 202, {"Content-Type": "application/json"}
 
 
@@ -316,6 +322,7 @@ async def get_user(id: str, user_id: str):
 
     return status, 200, {"Content-Type": "application/json"}
 
+
 @app.route("/team/<string:id>/user/<string:user_id>", methods=["PUT"])
 async def create_user(id: str, user_id: str):
     if not await db.team_exists(id):
@@ -326,15 +333,17 @@ async def create_user(id: str, user_id: str):
     status = await get_user_raw(id, user_id)
     if status is None:
         code = 202
-        work_id = await work_queue.enqueue(Work(id="register_user", type="register_user", payload={"team_id": id, "user_id": user_id}))
+        work_id = await work_queue.enqueue(
+            Work(id="register_user", type="register_user", payload={"team_id": id, "user_id": user_id})
+        )
         logger.debug(f"Enqueued register_user for team {id} and user {user_id}: {work_id}")
 
         status = await get_user_raw(id, user_id)
         if status is None:
             status = json.dumps({"id": user_id, "vpn_status": "registering", "vpn_config": None})
 
-
     return json.dumps(status), code, {"Content-Type": "application/json"}
+
 
 @app.route("/team/<string:id>/user/<string:user_id>", methods=["PATCH"])
 async def update_user(id: str, user_id: str):

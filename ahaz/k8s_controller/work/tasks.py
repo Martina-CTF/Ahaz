@@ -27,8 +27,10 @@ async def insert_db(team_id: str, port: int):
 async def register_user(team_id: str, user_id: str):
     await controller.register_user_ovpn(team_id, user_id)
 
+
 async def start_challenge(team_id: str, task: str):
     await controller.start_challenge(team_id, task)
+
 
 def stop_challenge(team_id: str, task: str):
     controller.stop_challenge(team_id, task)
