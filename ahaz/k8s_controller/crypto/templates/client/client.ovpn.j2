@@ -26,6 +26,9 @@ proto {{proto}}
 key-direction 1
 
 <tls-auth>
+-----BEGIN OpenVPN Static key V1-----
 {{ta}}
+-----END OpenVPN Static key V1-----
 </tls-auth>
 
+route {{ pod_network }} {{ pod_network_mask }}

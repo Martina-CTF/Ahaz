@@ -10,13 +10,17 @@ logger = logging.getLogger()
 
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 TEAM_PORT_RANGE_START = int(os.getenv("TEAM_PORT_RANGE_START", "20000"))
+K8S_IP_RANGE = os.getenv("K8S_IP_RANGE")
+
+pod_net = K8S_IP_RANGE.split("/")[0]
+pod_mask_int = K8S_IP_RANGE.split("/")[1] 
+pod_mask = ".".join([str((0xFFFFFFFF << (32 - int(pod_mask_int)) >> i) & 0xFF) for i in [24, 16, 8, 0]])
 
 
 # Config templates
 base_dir = os.path.dirname(os.path.abspath(__file__))
 j2env = Environment(loader=FileSystemLoader(os.path.join(base_dir, "templates")))
 openvpn_conf = j2env.get_template("server/openvpn.conf.j2")
-ovpn_env = j2env.get_template("server/ovpn.env.j2")
 
 def gen_ta_key() -> bytes:
     return os.urandom(256)  # 2048-bit random key
@@ -59,7 +63,9 @@ async def get_client_ovpn_config(
             key=client_cert.get_private_key_pem(),
             cert=client_cert.get_certificate_pem(),
             ca=ca_pem,
-            ta=team.ta_key.hex()
+            ta=team.ta_key.hex(),
+            pod_network=pod_net,
+            pod_network_mask=pod_mask
         )
 
 async def get_server_ovpn_config(

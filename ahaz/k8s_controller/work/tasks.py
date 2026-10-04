@@ -1,6 +1,5 @@
 from .. import controller
-from ..crypto.manager import gen_ta_key, gen_team
-from ..crypto.pki import mint_certificate
+from ..crypto.manager import gen_ta_key, gen_team, generate_user
 from ..db.models.team import Team
 from ..db.operator import set_team
 
@@ -28,4 +27,4 @@ async def insert_db(team_id: str, port: int):
 
 
 async def register_user(team_id: str, user_id: str):
-    await mint_certificate(team_id, user_id, False)
+    await generate_user(team_id, user_id)

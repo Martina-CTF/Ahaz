@@ -98,6 +98,7 @@ async def get_certificate_by_common_name(common_name: str) -> Certificate:
 
 async def get_pem_by_common_name(common_name: str) -> str:
     database = await get_context()
+    logger.debug(f"Searching for certificate with common name: {common_name}")
 
     certificate_bytes = await database.collections.certificates.find_one(
         {"common_name": common_name}, sort=[("valid_until", -1)], projection={"cert": 1, "_id": 0}

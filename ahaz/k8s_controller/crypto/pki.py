@@ -45,7 +45,7 @@ async def get_team_ca(team_id: str) -> Certificate:
         cert = await generate_ca(team_id)
 
     # Generate a bit before expiry to allow rollover
-    if cert.cert.not_valid_after < (
+    if cert.cert.not_valid_after_utc < (
         datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)
     ):
         logger.warning(f"CA certificate for team {team_id} is close to expiry, regenerating...")
@@ -61,7 +61,7 @@ async def mint_certificate(
     ca = await get_team_ca(team_id)
    
     try: 
-        _ = get_certificate_by_common_name(cn)
+        _ = await get_certificate_by_common_name(cn)
         logger.warning(f"Certificate for {cn} already exists in the DB, likely rollover")
     except ValueError:
         pass # First time
