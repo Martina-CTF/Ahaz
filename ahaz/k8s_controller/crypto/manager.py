@@ -46,7 +46,7 @@ async def get_client_ovpn_config(
     if ovpn_extra_client_config is None:
         ovpn_extra_client_config = []
 
-    client_cert = await get_certificate_by_common_name("{user_id}.{team_id}.{PUBLIC_DOMAINNAME}")
+    client_cert = await get_certificate_by_common_name(f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}")
     ca_pem = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
 
     team = await get_team(team_id)
@@ -61,3 +61,34 @@ async def get_client_ovpn_config(
             ca=ca_pem,
             ta=team.ta_key.hex()
         )
+
+async def get_server_ovpn_config(
+        team_id: str,
+        ovpn_port: int = 1194,
+        ovpn_proto: list[str] | None = None,
+        ovpn_extra_server_config: list[str] | None = None,
+        ) -> str:
+        if ovpn_proto is None:
+            ovpn_proto = ["tcp"]
+        if ovpn_extra_server_config is None:
+            ovpn_extra_server_config = []
+        ca_pem = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+        server_cert = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
+        team = await get_team(team_id)
+        return openvpn_conf.render(
+                cn=f"server.{team_id}.{PUBLIC_DOMAINNAME}",
+                port=ovpn_port,
+                protocols=ovpn_proto,
+                additional_options=ovpn_extra_server_config,
+                key=server_cert.get_private_key_pem(),
+                cert=server_cert.get_certificate_pem(),
+                ca=ca_pem,
+                ta=team.ta_key.hex()
+            )
+
+async def generate_user(team_id: str, user_id: str):
+    try:
+        await mint_certificate(team_id, f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}", server=False)
+    except Exception as e:
+        logger.error(f"Failed to create user {user_id} for team {team_id}: {str(e)}")
+        raise e

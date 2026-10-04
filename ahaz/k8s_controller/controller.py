@@ -9,7 +9,6 @@ from pathlib import Path
 import redis.asyncio as aioredis
 from ahaz_common.task import AccessEnum, PodInformation, Task
 from ahaz_common.util import adapt_limit_size
-from cryptography.hazmat.primitives import serialization
 from kubernetes import config, watch
 from kubernetes.client import (
     CoreV1Api,
@@ -53,10 +52,12 @@ from kubernetes.client import (
 from kubernetes.client.rest import ApiException
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from .crypto.manager import generate_user, get_server_ovpn_config
 from .db.operator import (
     get_certificate_by_common_name,
     get_pem_by_common_name,
     get_task_definition,
+    get_team,
 )
 from .util.container import get_image_name
 from .util.misc import str_to_bool
@@ -624,7 +625,7 @@ async def create_team_vpn_configmap(team_id: str) -> None:
         core_api = CoreV1Api()
         teamCertDir = CERT_DIR_CONTAINER + team_id
 
-        ovpn_config = get_server_ovpn_config(teamCertDir)
+        ovpn_config = await get_server_ovpn_config(teamCertDir)
         
         try:
             server = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
@@ -633,8 +634,7 @@ async def create_team_vpn_configmap(team_id: str) -> None:
             logger.error(f"Error retrieving certificates for team {team_id}: {e}")
             raise e
 
-        server_ta = get_server_ta(teamCertDir)
-        ovpn_env = get_openvpn_env(teamCertDir)
+        team = await get_team(team_id)
 
         # TODO: Figure a better way to read in the up and down scripts for use in ConfigMap
         basedir = Path(__file__).parent
@@ -650,8 +650,7 @@ async def create_team_vpn_configmap(team_id: str) -> None:
                 "server.key": server.get_private_key_pem(),
                 "server.crt": server.get_certificate_pem(),
                 "ca.crt": ca,
-                "ta.key": server_ta,
-                "ovpn.env": ovpn_env,
+                "ta.key": team.ta_key.hex(),
                 "up.sh": up_script,
                 "down.sh": down_script,
             },
@@ -705,7 +704,6 @@ async def create_team_vpn_container(team_id: str) -> None:
                                 V1KeyToPath(key="server.crt", path="pki/issued/server.crt"),
                                 V1KeyToPath(key="ca.crt", path="pki/ca.crt"),
                                 V1KeyToPath(key="ta.key", path="pki/ta.key"),
-                                V1KeyToPath(key="ovpn.env", path="ovpn_env.sh"),
                                 V1KeyToPath(key="up.sh", path="up.sh"),
                                 V1KeyToPath(key="down.sh", path="down.sh"),
                             ],
@@ -796,9 +794,8 @@ def expose_team_vpn_container(team_id: str, port: int) -> None:
         raise e
 
 
-def register_user_ovpn(teamname: str, username: str) -> str:
-    cert_dir = CERT_DIR_CONTAINER + teamname
-    generate_user(teamname, username, cert_dir)
+async def register_user_ovpn(team_id: str, user_id: str) -> str:
+    await generate_user(team_id, user_id)
     # TODO: change
     # dboperator.insert_user_vpn_config(teamname, username, result)
     return "successfully registered"
