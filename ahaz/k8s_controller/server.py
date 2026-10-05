@@ -13,7 +13,6 @@ import k8s_controller.db.operator as db
 import redis.asyncio as aioredis
 import uvicorn
 from ahaz_common.task import Task
-from k8s_controller.db.collections import init_db
 from pydantic import ValidationError
 from quart import Quart, Response, make_response, request
 

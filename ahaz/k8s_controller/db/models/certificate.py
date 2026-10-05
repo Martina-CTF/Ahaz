@@ -41,7 +41,7 @@ class Certificate:
 
     @property
     def valid_until(self) -> datetime:
-        return self.cert.not_valid_after
+        return self.cert.not_valid_after_utc
 
     @property
     def common_name(self) -> str:

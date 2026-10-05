@@ -1,0 +1,34 @@
+client
+nobind
+dev tun
+remote-cert-tls server
+remote {{cn}} {{port}}
+{% for proto in protocols %}
+proto {{proto}}
+{% endfor %}
+
+{% for additional_options in additional_options %}
+{{additional_options}}
+{% endfor %}
+
+<key>
+{{key}}
+</key>
+
+<cert>
+{{cert}}
+</cert>
+
+<ca>
+{{ca}}
+</ca>
+
+key-direction 1
+
+<tls-auth>
+-----BEGIN OpenVPN Static key V1-----
+{{ta}}
+-----END OpenVPN Static key V1-----
+</tls-auth>
+
+route {{ pod_network }} {{ pod_network_mask }}
