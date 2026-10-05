@@ -12,7 +12,8 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 logger = logging.getLogger()
 
-KEY_ALGO = os.getenv("KEY_ALGO", "ed25519").lower()  # One of ed25519, rsa, ecdsa
+KEY_ALGO = os.getenv("CRYPTO_KEY_ALGO", "ed25519").lower()  # One of ed25519, rsa, ecdsa
+CERT_ORGANIZATION = os.getenv("CRYPTO_CERT_ORGANIZATION", "Ahaz")
 
 
 def generate_key() -> CertificateIssuerPrivateKeyTypes:
@@ -25,6 +26,22 @@ def generate_key() -> CertificateIssuerPrivateKeyTypes:
     else:
         logger.error(f"Unsupported KEY_ALGO: {KEY_ALGO}")
         raise ValueError(f"Unsupported KEY_ALGO: {KEY_ALGO}")
+
+# SHA-384 is widely used in TLS certs, so it's a sensible default
+HASH_FUNCTION = os.getenv("CRYPTO_HASH_FUNCTION", "sha384").lower()
+def hash_function(key: CertificateIssuerPrivateKeyTypes) -> hashes.HashAlgorithm | None:
+    if isinstance(key, (ed25519.Ed25519PrivateKey, ed448.Ed448PrivateKey)):
+        return None # EdDSA algorithms have their hash function defined in-spec; so it must be None.
+    elif HASH_FUNCTION == "sha256":
+        return hashes.SHA256()
+    elif HASH_FUNCTION == "sha384":
+        return hashes.SHA384()
+    elif HASH_FUNCTION == "sha512":
+        return hashes.SHA512()
+    else:
+        logger.error(f"Unsupported HASH_FUNCTION: {HASH_FUNCTION}")
+        raise ValueError(f"Unsupported HASH_FUNCTION: {HASH_FUNCTION}")
+    
 
 
 def create_CA_certificate(key: CertificateIssuerPrivateKeyTypes, cn: str) -> x509.Certificate:
@@ -44,12 +61,7 @@ def create_CA_certificate(key: CertificateIssuerPrivateKeyTypes, cn: str) -> x50
         .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
         .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650))
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .sign(
-            key,
-            # TODO: Make hashing algorithm configurable; in case we are paranoid and SHA-384 is not enough
-            # SHA-384 is widely used in TLS certs, so it's a sensible default
-            None if isinstance(key, (ed25519.Ed25519PrivateKey, ed448.Ed448PrivateKey)) else hashes.SHA384(),
-        )
+        .sign(key, hash_function(key))  # pyright: ignore[reportArgumentType]
     )
 
 
@@ -63,7 +75,7 @@ def create_signed_certificate(
     subject = x509.Name(
         [
             x509.NameAttribute(NameOID.COMMON_NAME, cn),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Ahaz"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, CERT_ORGANIZATION),
         ]
     )
     csr = (
@@ -100,4 +112,4 @@ def create_signed_certificate(
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False
         )
 
-    return csr.sign(ca_key, hashes.SHA384() if isinstance(ca_key, (rsa.RSAPrivateKey)) else None)
+    return csr.sign(ca_key, hash_function(ca_key))  # pyright: ignore[reportArgumentType]
