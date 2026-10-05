@@ -1,0 +1,37 @@
+server 192.168.255.0 255.255.255.0
+verb 3
+dev tun0
+port {{port}}
+{% for proto in protocols %}
+proto {{proto}}
+{% endfor %}
+
+{% for additional_options in additional_options %}
+{{additional_options}}
+{% endfor %}
+
+<key>
+{{key}}
+</key>
+
+<cert>
+{{cert}}
+</cert>
+
+<ca>
+{{ca}}
+</ca>
+
+key-direction 0
+
+<tls-auth>
+-----BEGIN OpenVPN Static key V1-----
+{{ta}}
+-----END OpenVPN Static key V1-----
+</tls-auth>
+
+# Crypto params
+dh none
+ecdh-curve secp384r1
+
+keepalive 10 60

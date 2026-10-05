@@ -31,9 +31,7 @@ logging.getLogger("mysql").setLevel(logging.INFO)
 async def do_work(work_type: str, payload: dict[str, Any]) -> None:
     match work_type:
         case "gen_cert":
-            await tasks.gen_cert(
-                payload["team_id"], payload["port"], payload["public_domainname"], payload["certdir"]
-            )
+            await tasks.gen_cert(payload["team_id"])
         case "create_namespace":
             tasks.create_namespace(payload["team_id"])
         case "create_vpn_container":

@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import traceback
+from pathlib import Path
 
 import redis.asyncio as aioredis
 from ahaz_common.task import AccessEnum, PodInformation, Task
@@ -51,19 +52,12 @@ from kubernetes.client import (
 from kubernetes.client.rest import ApiException
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from .certmanager import (
-    generate_user,
-    get_down_script,
-    get_openvpn_env,
-    get_server_ovpn_config,
-    get_server_ta,
-    get_up_script,
-    get_user,
-)
+from .crypto.manager import generate_user, get_server_ovpn_config
 from .db.operator import (
     get_certificate_by_common_name,
     get_pem_by_common_name,
     get_task_definition,
+    get_team,
 )
 from .util.container import get_image_name
 from .util.misc import str_to_bool
@@ -74,9 +68,13 @@ from .util.misc import str_to_bool
 
 logger = logging.getLogger()
 
+def mask_to_cidr(mask: str) -> int:
+    return sum(bin(int(x)).count("1") for x in mask.split("."))
+
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 K8S_IMAGEPULLSECRET_NAMESPACE = os.getenv("K8S_IMAGEPULLSECRET_NAMESPACE", "default")
 K8S_IMAGEPULLSECRET_NAME = os.getenv("K8S_IMAGEPULLSECRET_NAME", "regcred")
+K8S_IP_RANGE = os.getenv("K8S_IP_RANGE")
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
 OVPN_IMAGE = os.getenv("OVPN_IMAGE", "lisenet/openvpn")
 OVPN_TAG = os.getenv("OVPN_TAG", "latest")
@@ -625,25 +623,26 @@ def create_team_namespace(team_id: str) -> None:
 
 
 @retry(**retry_opts)
-async def create_team_vpn_configmap(team_id) -> None:
+async def create_team_vpn_configmap(team_id: str) -> None:
     load_kube_config()
     try:
         core_api = CoreV1Api()
-        teamCertDir = CERT_DIR_CONTAINER + team_id
 
-        ovpn_config = get_server_ovpn_config(teamCertDir)
+        ovpn_config = await get_server_ovpn_config(team_id)
         
         try:
-            server_cert = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
+            server = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
             ca = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
         except ValueError as e:
             logger.error(f"Error retrieving certificates for team {team_id}: {e}")
             raise e
 
-        server_ta = get_server_ta(teamCertDir)
-        ovpn_env = get_openvpn_env(teamCertDir)
-        up_script = get_up_script(teamCertDir)
-        down_script = get_down_script(teamCertDir)
+        team = await get_team(team_id)
+
+        # TODO: Figure a better way to read in the up and down scripts for use in ConfigMap
+        basedir = Path(__file__).parent
+        up_script = (basedir / "assets" / "up.sh").read_text()
+        down_script = (basedir / "assets" / "down.sh").read_text()
 
         config_map = V1ConfigMap(
             api_version="v1",
@@ -651,13 +650,13 @@ async def create_team_vpn_configmap(team_id) -> None:
             metadata=V1ObjectMeta(name=f"{team_id}-vpn-config"),
             data={
                 "ovpn.conf": ovpn_config,
-                "server.key": server_cert.get_private_key_pem(),
-                "server.crt": server_cert.get_certificate_pem(),
+                "server.key": server.get_private_key_pem(),
+                "server.crt": server.get_certificate_pem(),
                 "ca.crt": ca,
-                "ta.key": server_ta,
-                "ovpn.env": ovpn_env,
+                "ta.key": team.ta_key.hex(),
                 "up.sh": up_script,
                 "down.sh": down_script,
+                "ovpn_env.sh": f"export OVPN_SERVER={K8S_IP_RANGE}"
             },
         )
 
@@ -709,9 +708,9 @@ async def create_team_vpn_container(team_id: str) -> None:
                                 V1KeyToPath(key="server.crt", path="pki/issued/server.crt"),
                                 V1KeyToPath(key="ca.crt", path="pki/ca.crt"),
                                 V1KeyToPath(key="ta.key", path="pki/ta.key"),
-                                V1KeyToPath(key="ovpn.env", path="ovpn_env.sh"),
                                 V1KeyToPath(key="up.sh", path="up.sh"),
                                 V1KeyToPath(key="down.sh", path="down.sh"),
+                                V1KeyToPath(key="ovpn_env.sh", path="ovpn_env.sh")
                             ],
                         ),
                     ),
@@ -800,19 +799,11 @@ def expose_team_vpn_container(team_id: str, port: int) -> None:
         raise e
 
 
-# TODO: Remove this and just call generate_user directly? Certificate rework will not need this, tho.
 async def register_user_ovpn(team_id: str, user_id: str) -> str:
-    vpnDirLocation = CERT_DIR_CONTAINER + team_id
-    await generate_user(team_id, user_id, vpnDirLocation)
+    await generate_user(team_id, user_id)
+    # TODO: change
+    # dboperator.insert_user_vpn_config(teamname, username, result)
     return "successfully registered"
-
-
-# TODO: Remove this, nothing calls it.
-async def obtain_user_ovpn_config(team_id: str, user_id: str) -> str:
-    vpnDirLocation = CERT_DIR_CONTAINER + team_id
-    result = await get_user(team_id, user_id, vpnDirLocation)
-    result = str(result).replace("\\n", "\n")
-    return result
 
 
 # FIXME: I am unused! Probably will be used when team deletion is implemented.

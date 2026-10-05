@@ -1,10 +1,11 @@
-from .. import certmanager, controller
+from .. import controller
+from ..crypto.manager import gen_ta_key, gen_team, generate_user
 from ..db.models.team import Team
 from ..db.operator import set_team
 
 
-async def gen_cert(team_id: str, port: int, public_domainname: str, certdir: str):
-    await certmanager.gen_team(team_id, public_domainname, port, "tcp", certdir)
+async def gen_cert(team_id: str):
+    await gen_team(team_id)
 
 
 def create_namespace(team_id: str):
@@ -20,9 +21,10 @@ def expose_vpn_container(team_id: str, port: int):
 
 
 async def insert_db(team_id: str, port: int):
-    team = Team(team_id=team_id, port=port)
+    ta_key = gen_ta_key()
+    team = Team(team_id=team_id, port=port, ta_key=ta_key)
     await set_team(team)
 
 
 async def register_user(team_id: str, user_id: str):
-    await controller.register_user_ovpn(team_id, user_id)
+    await generate_user(team_id, user_id)

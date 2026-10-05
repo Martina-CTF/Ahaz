@@ -12,17 +12,17 @@ from ahaz_common import (
     UserRequest,
 )
 from ahaz_common.task import Task
-from k8s_controller.db.collections import init_db
 from pydantic import ValidationError
 from quart import Quart, make_response, request
 
-from .certmanager import get_user
 from .controller import (
     get_pods_namespace,
     k8s_watcher,
     start_challenge,
     stop_challenge,
 )
+from .crypto.manager import get_client_ovpn_config
+from .db.collections import init_db
 from .db.operator import (
     insert_task_definition,
     list_challenges,
@@ -141,11 +141,9 @@ async def getuser():
     except ValidationError as e:
         logger.error(f"Validation error: {e}")
         return "Invalid request data", 400
-    
+
     try:
-        config = await get_user(
-            request_data.team_id, request_data.user_id, CERT_DIR_CONTAINER + request_data.team_id
-        )
+        config = await get_client_ovpn_config(request_data.user_id, request_data.team_id)
     except ValueError:
         logger.info(f"User {request_data.user_id} has no certificate yet.")
         return "user not found", 404

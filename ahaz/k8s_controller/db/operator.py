@@ -41,7 +41,7 @@ async def get_task_definition(name: str) -> Task:
 async def set_team(team: Team) -> None:
     database = await get_context()
 
-    team_doc = TeamDoc(team_id=team.team_id, port=team.port)
+    team_doc = TeamDoc(team_id=team.team_id, port=team.port, ta_key=team.ta_key)
 
     await database.collections.teams.update_one(
         {"team_id": team.team_id},
@@ -98,6 +98,7 @@ async def get_certificate_by_common_name(common_name: str) -> Certificate:
 
 async def get_pem_by_common_name(common_name: str) -> str:
     database = await get_context()
+    logger.debug(f"Searching for certificate with common name: {common_name}")
 
     certificate_bytes = await database.collections.certificates.find_one(
         {"common_name": common_name}, sort=[("valid_until", -1)], projection={"cert": 1, "_id": 0}
