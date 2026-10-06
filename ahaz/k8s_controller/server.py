@@ -124,8 +124,6 @@ async def get_team_raw(team_id: str) -> str | None:
     # Remove ta_key
     team_dict.pop("ta_key", None)
 
-    logger.debug(f"team_dict: {team_dict}")
-
     return json.dumps(team_dict)
 
 
