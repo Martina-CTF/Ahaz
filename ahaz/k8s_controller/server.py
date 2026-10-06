@@ -113,7 +113,7 @@ async def get_team_raw(team_id: str) -> str | None:
     namespace_status = "none"
     if k8s.check_namespace_exists(team_id):
         namespace_status = "exists"
-    if cert.get_server_cert(team_id) is not None:
+    if await cert.get_server_cert(team_id) is not None:
         namespace_status = "cert_exists"
     # TODO: check for VPN container?
 
