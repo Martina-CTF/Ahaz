@@ -7,9 +7,8 @@ from asyncio.subprocess import Process
 from threading import Thread
 from typing import TypedDict
 
-import k8s_controller.certmanager as cert
-import k8s_controller.controller as k8s
-import k8s_controller.db.operator as db
+from . import controller as k8s
+from .db import operator as db
 import redis.asyncio as aioredis
 import uvicorn
 from ahaz_common.task import Task
@@ -17,6 +16,8 @@ from pydantic import ValidationError
 from quart import Quart, Response, make_response, request
 
 from .controller import PodInfo
+from .crypto import manager as cert
+from .db.collections import init_db
 from .work import Work, WorkQueue
 
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
@@ -78,7 +79,6 @@ async def update_task(id: str):
         return existing_task.model_dump_json(), 200, {"Content-Type": "application/json"}
 
     await db.insert_task_definition(task)
-    # TODO: what happens when a challenge is already running?
 
     return task.model_dump_json(), 201, {"Content-Type": "application/json"}
 
@@ -98,8 +98,7 @@ async def get_teams():
 
 
 async def get_user_raw(team_id: str, user_id: str) -> str | None:
-    # TODO: waiting on cert PR
-    user_cert = await cert.get_user(team_id, user_id, CERT_DIR_CONTAINER + team_id)
+    user_cert = await cert.get_client_ovpn_config(user_id, team_id)
     if user_cert is None:
         return None
 
@@ -114,33 +113,37 @@ async def get_team_raw(team_id: str) -> str | None:
     namespace_status = "none"
     if k8s.check_namespace_exists(team_id):
         namespace_status = "exists"
-
-    # TODO: check for VPN container and VPN certs, once #420 finishes the PR
+    if cert.get_server_cert(team_id) is not None:
+        namespace_status = "cert_exists"
+    # TODO: check for VPN container?
 
     team_dict = team.model_dump()
     team_dict["namespace_status"] = namespace_status
     team_dict["users"] = []
+
+    # Remove ta_key
+    team_dict.pop("ta_key", None)
+
+    logger.debug(f"team_dict: {team_dict}")
 
     return json.dumps(team_dict)
 
 
 @app.route("/team/<string:id>", methods=["GET"])
 async def get_team(id: str):
-    team = await db.get_team(id)
-    if team is None:
+    team_raw = await get_team_raw(id)
+    if team_raw is None:
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    return team.model_dump_json(), 200, {"Content-Type": "application/json"}
+    return team_raw, 200, {"Content-Type": "application/json"}
 
 
 @app.route("/team/<string:id>", methods=["PUT"])
 async def update_team(id: str):
-    logger.debug("getting team")
     team_raw = await get_team_raw(id)
     if team_raw is not None:
         return team_raw, 200, {"Content-Type": "application/json"}
 
-    logger.debug("getting ports")
     # Get unused port
     used_ports = await db.list_ports()
     random.shuffle(used_ports)  # God help me if a port collision actually happens.
@@ -163,56 +166,55 @@ async def update_team(id: str):
     if port is None:
         return {"error": "No available ports"}, 500, {"Content-Type": "application/json"}
 
-    logger.debug("inserting team")
-    team = db.Team(team_id=id, port=port)
-    await db.set_team(team)
-
-    logger.debug("enqueuing tasks")
     work_ids = await work_queue.enqueue_many(
         [
             Work(
                 id="gen_cert",
                 type="gen_cert",
                 payload={
-                    "team_id": team.team_id,
+                    "team_id": id,
                     "port": port,
                     "public_domainname": PUBLIC_DOMAINNAME,
                     "certdir": CERT_DIR_CONTAINER,
                 },
-                idempotent_on={"team_id": team.team_id},
+                idempotent_on={"team_id": id},
             ),
             Work(
                 id="create_namespace",
                 type="create_namespace",
-                payload={"team_id": team.team_id},
-                idempotent_on={"team_id": team.team_id},
+                payload={"team_id": id},
+                idempotent_on={"team_id": id},
             ),
             Work(
                 id="create_vpn_container",
                 type="create_vpn_container",
-                payload={"team_id": team.team_id},
-                idempotent_on={"team_id": team.team_id},
+                payload={"team_id": id},
+                idempotent_on={"team_id": id},
                 deps=["gen_cert", "create_namespace"],
             ),
             Work(
                 id="expose_vpn_container",
                 type="expose_vpn_container",
-                payload={"team_id": team.team_id, "port": port},
-                idempotent_on={"team_id": team.team_id},
+                payload={"team_id": id, "port": port},
+                idempotent_on={"team_id": id},
                 deps=["create_vpn_container"],
             ),
             Work(
                 id="insert_db",
                 type="insert_db",
-                payload={"team_id": team.team_id, "port": port},
-                idempotent_on={"team_id": team.team_id},
+                payload={"team_id": id, "port": port},
+                idempotent_on={"team_id": id},
             ),
         ]
     )
 
-    logger.debug(f"Enqueued tasks for team {team.team_id}: {work_ids}")
+    logger.debug(f"Enqueued tasks for team {id}: {work_ids}")
 
-    return await get_team_raw(team.team_id), 201, {"Content-Type": "application/json"}
+    team_raw = await get_team_raw(id)
+    if team_raw is None:
+        team_raw = json.dumps({"team_id": id, "port": port, "namespace_status": "none", "users": []})    
+
+    return team_raw, 201, {"Content-Type": "application/json"}
 
 
 @app.route("/team/<string:id>", methods=["DELETE"])
@@ -220,9 +222,32 @@ async def delete_team(id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    # TODO: delete namespace, VPN container, and VPN certs
+    work_ids = await work_queue.enqueue_many(
+        [
+            Work(
+                id="delete_team_namespace",
+                type="delete_team_namespace",
+                payload={"team_id": id},
+                idempotent_on={"team_id": id},
+            ),
+            Work(
+                id="delete_team_certificates",
+                type="delete_team_certificates",
+                payload={"team_id": id},
+                idempotent_on={"team_id": id},
+            ),
+            Work(
+                id="delete_team_db",
+                type="delete_team_db",
+                payload={"team_id": id},
+                idempotent_on={"team_id": id},
+            ),
+        ]
+    )
 
-    return {"error": "Not implemented"}, 501, {"Content-Type": "application/json"}
+    logger.debug(f"Enqueued tasks for deleting team {id}: {work_ids}")
+
+    return json.dumps({"team_id": id, "status": "deleting"}), 202, {"Content-Type": "application/json"}
 
 
 @app.route("/team/<string:id>/namespace", methods=["GET"])
@@ -306,8 +331,17 @@ async def get_team_users(id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    # TODO: implement when #8 is merged
-    return {"message": "Not implemented"}, 501, {"Content-Type": "application/json"}
+    user_certs = await cert.get_client_certificate_all(id)
+    users = [
+        {
+            "id": user_id,
+            "vpn_status": "active",
+            "vpn_config": await cert.get_client_ovpn_config(user_id, id)
+        }
+        for user_id in user_certs.keys()
+    ]
+
+    return json.dumps(users), 200, {"Content-Type": "application/json"}
 
 
 @app.route("/team/<string:id>/user/<string:user_id>", methods=["GET"])
@@ -315,11 +349,11 @@ async def get_user(id: str, user_id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    status = await get_user_raw(id, user_id)
-    if status is None:
+    user_raw = await get_user_raw(id, user_id)
+    if user_raw is None:
         return {"error": "User not found"}, 404, {"Content-Type": "application/json"}
 
-    return status, 200, {"Content-Type": "application/json"}
+    return user_raw, 200, {"Content-Type": "application/json"}
 
 
 @app.route("/team/<string:id>/user/<string:user_id>", methods=["PUT"])
@@ -349,8 +383,33 @@ async def update_user(id: str, user_id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    # TODO: implement when #8 is merged
-    return {"message": "Not implemented"}, 501, {"Content-Type": "application/json"}
+    if not await cert.get_client_certificate(team_id=id, user_id=user_id):
+        return {"error": "User not found"}, 404, {"Content-Type": "application/json"}
+
+    status = 200
+    request_data = await request.get_json()
+    if "vpn_config" in request_data:
+        status = 202
+        work_ids = await work_queue.enqueue_many(
+            [
+                Work(
+                    id="delete_user_certificate",
+                    type="delete_user_certificate",
+                    payload={"team_id": id, "user_id": user_id},
+                    idempotent_on={"team_id": id, "user_id": user_id},
+                ),
+                Work(
+                    id="register_user",
+                    type="register_user",
+                    payload={"team_id": id, "user_id": user_id},
+                    idempotent_on={"team_id": id, "user_id": user_id},
+                    deps=["delete_user_certificate"],
+                ),
+            ]
+        )
+        logger.debug(f"Enqueued tasks for updating user {user_id} in team {id}: {work_ids}")
+
+    return get_user_raw(id, user_id), status, {"Content-Type": "application/json"}
 
 
 @app.route("/team/<string:id>/user/<string:user_id>", methods=["DELETE"])
@@ -358,8 +417,15 @@ async def delete_user(id: str, user_id: str):
     if not await db.team_exists(id):
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    # TODO: implement when #8 is merged
-    return {"message": "Not implemented"}, 501, {"Content-Type": "application/json"}
+    if not await cert.get_client_certificate(team_id=id, user_id=user_id):
+        return {"error": "User not found"}, 404, {"Content-Type": "application/json"}
+
+    work_id = await work_queue.enqueue(
+        Work(id="delete_user_certificate", type="delete_user_certificate", payload={"team_id": id, "user_id": user_id})
+    )
+    logger.debug(f"Enqueued delete_user_certificate for team {id} and user {user_id}: {work_id}")
+
+    return json.dumps({"id": user_id, "status": "deleting"}), 202, {"Content-Type": "application/json"}
 
 
 @app.route("/events", methods=["GET"])

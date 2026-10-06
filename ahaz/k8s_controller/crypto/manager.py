@@ -2,15 +2,16 @@ import logging
 import os
 
 from jinja2 import Environment, FileSystemLoader
-from k8s_controller.db.operator import get_certificate_by_common_name, get_pem_by_common_name, get_team
+from k8s_controller.db.operator import get_certificate_by_common_name, get_pem_by_common_name, get_team, get_certificates_by_cn_suffix, delete_cert_by_common_name
 
+from ..db.models.certificate import Certificate
 from .pki import generate_ca, mint_certificate
 
 logger = logging.getLogger()
 
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 TEAM_PORT_RANGE_START = int(os.getenv("TEAM_PORT_RANGE_START", "20000"))
-K8S_IP_RANGE = os.getenv("K8S_IP_RANGE")
+K8S_IP_RANGE = os.getenv("K8S_IP_RANGE", "10.42.0.0/24")
 
 pod_net = K8S_IP_RANGE.split("/")[0]
 pod_mask_int = K8S_IP_RANGE.split("/")[1] 
@@ -37,23 +38,58 @@ async def gen_team(team_id: str):
 
 client_conf = j2env.get_template("client/client.ovpn.j2")
 
+async def get_client_certificate(team_id: str, user_id: str) -> Certificate | None:
+    common_name = f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}"
+    return await get_certificate_by_common_name(common_name)
+
+async def get_client_certificate_all(team_id: str) -> dict[str, Certificate]:
+    certs = await get_certificates_by_cn_suffix(f".{team_id}.{PUBLIC_DOMAINNAME}")
+    cert_map: dict[str, Certificate] = {}
+    for cn, cert in certs.items():
+        if cn.endswith(f".{team_id}.{PUBLIC_DOMAINNAME}"):
+            user_id = cn.split(".")[0]
+            if user_id not in ["server", "ca"]:
+                cert_map[user_id] = cert
+
+    return cert_map
+
+async def get_ca_pem(team_id: str) -> str | None:
+    common_name = f"ca.{team_id}.{PUBLIC_DOMAINNAME}"
+    return await get_pem_by_common_name(common_name)
+
+async def get_ca_cert(team_id: str) -> Certificate | None:
+    common_name = f"ca.{team_id}.{PUBLIC_DOMAINNAME}"
+    return await get_certificate_by_common_name(common_name)
+
+async def get_server_cert(team_id: str) -> Certificate | None:
+    common_name = f"server.{team_id}.{PUBLIC_DOMAINNAME}"
+    return await get_certificate_by_common_name(common_name)
+
 async def get_client_ovpn_config(
     user_id: str,
     team_id: str,
     ovpn_port: int = 1194,
     ovpn_proto: list[str] | None = None,
     ovpn_extra_client_config: list[str] | None = None,
-) -> str:
+) -> str | None:
     if ovpn_proto is None:
         ovpn_proto = ["tcp"]
 
     if ovpn_extra_client_config is None:
         ovpn_extra_client_config = []
 
-    client_cert = await get_certificate_by_common_name(f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}")
-    ca_pem = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+    client_cert = await get_client_certificate(team_id, user_id)
+    if client_cert is None:
+        return None
+
+    ca_pem = await get_ca_pem(team_id)
+    if ca_pem is None:
+        return None
 
     team = await get_team(team_id)
+    if team is None:
+        logger.warning(f"Team {team_id} not found when generating client config for user {user_id}")
+        return None
 
     return client_conf.render(
             cn=f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}",
@@ -78,9 +114,18 @@ async def get_server_ovpn_config(
             ovpn_proto = ["tcp"]
         if ovpn_extra_server_config is None:
             ovpn_extra_server_config = []
-        ca_pem = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
-        server_cert = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
+        ca_pem = await get_ca_pem(team_id)
+        if ca_pem is None:
+            raise ValueError(f"CA PEM not found for team {team_id}")
+
+        server_cert = await get_server_cert(team_id)
+        if server_cert is None:
+            raise ValueError(f"Server certificate not found for team {team_id}")
+            
         team = await get_team(team_id)
+        if team is None:
+            raise ValueError(f"Team {team_id} not found when generating server config")
+
         return openvpn_conf.render(
                 cn=f"server.{team_id}.{PUBLIC_DOMAINNAME}",
                 port=ovpn_port,
@@ -91,6 +136,15 @@ async def get_server_ovpn_config(
                 ca=ca_pem,
                 ta=team.ta_key.hex()
             )
+
+async def delete_team_certificates(team_id: str) -> None:
+    certs = await get_certificates_by_cn_suffix(f".{team_id}.{PUBLIC_DOMAINNAME}")
+    for cn in certs.keys():
+        await delete_cert_by_common_name(cn)
+
+async def delete_user_certificate(team_id: str, user_id: str) -> None:
+    cn = f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}"
+    await delete_cert_by_common_name(cn)
 
 async def generate_user(team_id: str, user_id: str):
     try:

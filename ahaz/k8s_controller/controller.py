@@ -56,10 +56,8 @@ from tenacity.retry import retry_base
 from tenacity.stop import stop_base
 from tenacity.wait import wait_base
 
-from .crypto.manager import generate_user, get_server_ovpn_config
+from .crypto.manager import generate_user, get_server_ovpn_config, get_server_cert, get_ca_pem
 from .db.operator import (
-    get_certificate_by_common_name,
-    get_pem_by_common_name,
     get_task_definition,
     get_team,
 )
@@ -71,9 +69,6 @@ from .util.misc import str_to_bool
 # Woe.
 
 logger = logging.getLogger()
-
-def mask_to_cidr(mask: str) -> int:
-    return sum(bin(int(x)).count("1") for x in mask.split("."))
 
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 K8S_IMAGEPULLSECRET_NAMESPACE = os.getenv("K8S_IMAGEPULLSECRET_NAMESPACE", "default")
@@ -139,7 +134,7 @@ class RetryOpts(TypedDict):
 
 
 retry_opts: RetryOpts = {
-    "retry": retry_if_exception(should_retry_request),  # type: ignore
+    "retry": retry_if_exception(should_retry_request),
     "stop": stop_after_attempt(5),  # Stop after 5 attempts
     "wait": wait_exponential(multiplier=1, min=2, max=10),  # Exponential backoff
 }
@@ -267,6 +262,9 @@ async def start_challenge(team_name: str, task_name: str) -> None:
         logger.info(f"Starting challenge {task_name} for team {team_name}")
         task = await get_task_definition(task_name)
 
+        if task is None:
+            raise ValueError(f"Task definition {task_name} not found in database")
+
         for pod in task.pods:
             version = task.version if task.version else "latest"
 
@@ -386,7 +384,7 @@ def create_pod_service(team_name: str, task_name: str, pod_name: str) -> None:
         )
 
         # Create the service in Kubernetes
-        api_response: V1Service = core_api.create_namespaced_service(namespace=team_name, body=service)  # type: ignore
+        api_response: V1Service = core_api.create_namespaced_service(namespace=team_name, body=service)
         logger.debug(f"Service created. Status='{api_response.status}'")
     except ApiException as e:
         if e.status != 403:
@@ -533,7 +531,7 @@ def create_secret_in_namespace(team_id: str, secret_data: V1Secret) -> None:
     try:
         core_api = CoreV1Api()
         core_api.create_namespaced_secret(namespace=team_id, body=secret_data)
-        logger.debug(f"Created secret {secret_data.metadata.name} in namespace {team_id}")  # type: ignore
+        logger.debug(f"Created secret {secret_data.metadata.name} in namespace {team_id}")
     except ApiException as e:
         if e.status != 403:
             logger.error(f"API Exception when creating secret in namespace {team_id}: {e}")
@@ -567,9 +565,9 @@ def check_namespaced_service_account_exists(namespace: str, service_account_name
         raise e
 
 
-patch_retry_opts = {
+patch_retry_opts: RetryOpts = {
     **retry_opts,
-    "retry": retry_if_exception(should_retry_patch),  # type: ignore
+    "retry": retry_if_exception(should_retry_patch),
 }
 
 
@@ -631,7 +629,7 @@ def create_team_namespace(team_id: str) -> None:
 
         regcred: V1Secret = core_api.read_namespaced_secret(
             name=K8S_IMAGEPULLSECRET_NAME, namespace=K8S_IMAGEPULLSECRET_NAMESPACE
-        )  # type: ignore
+        )
 
         if not regcred.metadata:
             logger.error(f"Secret {K8S_IMAGEPULLSECRET_NAME} is missing metadata.")
@@ -665,13 +663,20 @@ async def create_team_vpn_configmap(team_id: str) -> None:
 
         ovpn_config = await get_server_ovpn_config(team_id)
         try:
-            server = await get_certificate_by_common_name(f"server.{team_id}.{PUBLIC_DOMAINNAME}")
-            ca = await get_pem_by_common_name(f"ca.{team_id}.{PUBLIC_DOMAINNAME}")
+            server = await get_server_cert(team_id)
+            if server is None:
+                raise ValueError(f"Server certificate for team {team_id} not found.")
+
+            ca = await get_ca_pem(team_id)
+            if ca is None:
+                raise ValueError(f"CA certificate for team {team_id} not found.")
         except ValueError as e:
             logger.error(f"Error retrieving certificates for team {team_id}: {e}")
             raise e
 
         team = await get_team(team_id)
+        if team is None:
+            raise ValueError(f"Team {team_id} not found in database.")
 
         # TODO: Figure a better way to read in the up and down scripts for use in ConfigMap
         basedir = Path(__file__).parent
@@ -806,7 +811,7 @@ def expose_team_vpn_container(team_id: str, port: int) -> None:
         api_service_response: V1Service = core_api.create_namespaced_service(
             namespace=team_id,
             body=service,
-        )  # type: ignore
+        )
         logger.debug(f"Service created. Status: '{api_service_response.status}'")
 
         policy_deny = create_network_policy_deny_all()
@@ -819,28 +824,20 @@ def expose_team_vpn_container(team_id: str, port: int) -> None:
         logger.debug("Applying network policies...")
         api_network_response: V1NetworkPolicy = net_api.create_namespaced_network_policy(
             namespace=team_id, body=policy
-        )  # type: ignore
+        )
         logger.debug(f"Restrict-vpn-access policy created. Status: '{api_network_response}'")
 
         api_network_response_deny: V1NetworkPolicy = net_api.create_namespaced_network_policy(
             namespace=team_id, body=policy_deny
-        )  # type: ignore
+        )
         logger.debug(f"Deny-all policy created. Status: '{api_network_response_deny}'")
         logger.debug("Successfully applied network policy")
     except ApiException as e:
         if e.status != 403:
             logger.error(f"API Exception when exposing VPN container for team {team_id}: {e}")
         raise e
+        
 
-
-async def register_user_ovpn(team_id: str, user_id: str) -> str:
-    await generate_user(team_id, user_id)
-    # TODO: change
-    # dboperator.insert_user_vpn_config(teamname, username, result)
-    return "successfully registered"
-
-
-# FIXME: I am unused! Probably will be used when team deletion is implemented.
 def delete_namespace(team_id: str, timeout: int = 300, interval: int = 5) -> int:
     load_kube_config()
     try:
@@ -862,7 +859,7 @@ def delete_namespace(team_id: str, timeout: int = 300, interval: int = 5) -> int
                 ns = core_api.read_namespace(name=team_id)
 
                 # If namespace is stuck terminating → remove finalizers
-                if ns.metadata.deletion_timestamp and ns.spec.finalizers:  # type: ignore
+                if ns.metadata.deletion_timestamp and ns.spec.finalizers:
                     logger.debug(f"Namespace {team_id} stuck in Terminating, removing finalizers...")
                     body = V1Namespace(metadata=V1ObjectMeta(finalizers=[]))
                     try:
@@ -898,7 +895,7 @@ async def k8s_watcher(redis_client: aioredis.Redis) -> None:
     logger.info("Starting Kubernetes watcher...")
     for event_untyped in w.stream(core_api.list_pod_for_all_namespaces):
         try:
-            event: V1PodList = event_untyped  # type: ignore
+            event: V1PodList = event_untyped
 
             # Publish pod name, labels, status, ip to the event manager
             pod: V1Pod = event["object"]  # type: ignore

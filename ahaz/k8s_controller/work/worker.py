@@ -10,7 +10,7 @@ from typing import Any
 
 import redis.asyncio as aioredis
 
-from . import WORK_QUEUE, WorkQueue, tasks
+from . import tasks, WorkQueue, WORK_QUEUE
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 RECOVERY_INTERVAL = int(os.getenv("RECOVERY_INTERVAL", "5"))
@@ -46,6 +46,14 @@ async def do_work(work_type: str, payload: dict[str, Any]) -> None:
             await tasks.start_challenge(payload["team_id"], payload["task"])
         case "stop_challenge":
             tasks.stop_challenge(payload["team_id"], payload["task"])
+        case "delete_team_namespace":
+            await tasks.delete_team_namespace(payload["team_id"])
+        case "delete_team_certificates":
+            await tasks.delete_team_certificates(payload["team_id"])
+        case "delete_user_certificate":
+            await tasks.delete_user_certificate(payload["team_id"], payload["user_id"])
+        case "delete_team_db":
+            await tasks.delete_team_db(payload["team_id"])
         case _:
             raise Exception(f"Unknown work type: {work_type}")
 
@@ -69,6 +77,7 @@ async def _worker_loop(worker_id: str, r: aioredis.Redis) -> None:
                             "state": "started",
                             "id": work.id,
                             "type": work.type,
+                            "payload": work.payload
                         },
                     }
                 ),
