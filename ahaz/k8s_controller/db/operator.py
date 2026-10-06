@@ -112,9 +112,9 @@ async def list_ports() -> list[int]:
 
 
 async def insert_certificate(cert: Certificate) -> None:
-    '''
+    """
     It is recommended to use the functions in crypto/pki.py
-    '''
+    """
     database = await get_context()
 
     cert_doc = cert.to_doc()
@@ -123,9 +123,9 @@ async def insert_certificate(cert: Certificate) -> None:
 
 
 async def get_certificate_by_common_name(common_name: str) -> Certificate | None:
-    '''
+    """
     It is recommended to use the functions in crypto/manager.py and crypto/pki.py
-    '''
+    """
     database = await get_context()
 
     # Find newest certificate with the given common name
@@ -140,9 +140,9 @@ async def get_certificate_by_common_name(common_name: str) -> Certificate | None
 
 
 async def get_pem_by_common_name(common_name: str) -> str | None:
-    '''
+    """
     It is recommended to use the functions in crypto/manager.py
-    '''
+    """
     database = await get_context()
     logger.debug(f"Searching for certificate with common name: {common_name}")
 
@@ -155,10 +155,11 @@ async def get_pem_by_common_name(common_name: str) -> str | None:
 
     return extract_public_cert(certificate_bytes)
 
+
 async def get_certificates_by_cn_suffix(cn_suffix: str) -> dict[str, Certificate]:
-    '''
+    """
     It is recommended to use the functions in crypto/manager.py
-    '''
+    """
     database = await get_context()
 
     cert_docs: list[CertificateDoc] = await database.collections.certificates.find(
@@ -167,10 +168,11 @@ async def get_certificates_by_cn_suffix(cn_suffix: str) -> dict[str, Certificate
 
     return {cert_doc["common_name"]: Certificate.from_doc(cert_doc) for cert_doc in cert_docs}
 
+
 async def delete_cert_by_common_name(common_name: str) -> bool:
-    '''
+    """
     It is recommended to use the functions in crypto/manager.py
-    '''
+    """
     database = await get_context()
 
     result = await database.collections.certificates.delete_one({"common_name": common_name})

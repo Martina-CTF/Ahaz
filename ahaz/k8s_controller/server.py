@@ -7,16 +7,16 @@ from asyncio.subprocess import Process
 from threading import Thread
 from typing import TypedDict
 
-from . import controller as k8s
-from .db import operator as db
 import redis.asyncio as aioredis
 import uvicorn
 from ahaz_common.task import Task
 from pydantic import ValidationError
 from quart import Quart, Response, make_response, request
 
+from . import controller as k8s
 from .controller import PodInfo
 from .crypto import manager as cert
+from .db import operator as db
 from .db.collections import init_db
 from .work import Work, WorkQueue
 
@@ -212,7 +212,7 @@ async def update_team(id: str):
 
     team_raw = await get_team_raw(id)
     if team_raw is None:
-        team_raw = json.dumps({"team_id": id, "port": port, "namespace_status": "none", "users": []})    
+        team_raw = json.dumps({"team_id": id, "port": port, "namespace_status": "none", "users": []})
 
     return team_raw, 201, {"Content-Type": "application/json"}
 
@@ -333,11 +333,7 @@ async def get_team_users(id: str):
 
     user_certs = await cert.get_client_certificate_all(id)
     users = [
-        {
-            "id": user_id,
-            "vpn_status": "active",
-            "vpn_config": await cert.get_client_ovpn_config(user_id, id)
-        }
+        {"id": user_id, "vpn_status": "active", "vpn_config": await cert.get_client_ovpn_config(user_id, id)}
         for user_id in user_certs.keys()
     ]
 
@@ -421,7 +417,11 @@ async def delete_user(id: str, user_id: str):
         return {"error": "User not found"}, 404, {"Content-Type": "application/json"}
 
     work_id = await work_queue.enqueue(
-        Work(id="delete_user_certificate", type="delete_user_certificate", payload={"team_id": id, "user_id": user_id})
+        Work(
+            id="delete_user_certificate",
+            type="delete_user_certificate",
+            payload={"team_id": id, "user_id": user_id},
+        )
     )
     logger.debug(f"Enqueued delete_user_certificate for team {id} and user {user_id}: {work_id}")
 

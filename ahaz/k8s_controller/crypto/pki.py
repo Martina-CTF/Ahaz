@@ -1,7 +1,9 @@
-import json
 import datetime
+import json
 import logging
 import os
+
+import redis.asyncio as aioredis
 
 from ..db.models.certificate import Certificate
 from ..db.operator import get_certificate_by_common_name, insert_certificate
@@ -10,7 +12,6 @@ from .certificates import (
     create_signed_certificate,
     generate_key,
 )
-import redis.asyncio as aioredis
 
 PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certdir")
@@ -35,14 +36,19 @@ async def generate_ca(team_id: str) -> Certificate:
 
     await insert_certificate(cert_data)
 
-    await redis_client.publish("ahaz_events", json.dumps({
-        "type": "cert",
-        "data": {
-            "type": "created",
-            "team_id": team_id,
-            "common_name": cn,
-        },
-    }))
+    await redis_client.publish(
+        "ahaz_events",
+        json.dumps(
+            {
+                "type": "cert",
+                "data": {
+                    "type": "created",
+                    "team_id": team_id,
+                    "common_name": cn,
+                },
+            }
+        ),
+    )
 
     return cert_data
 
@@ -64,11 +70,9 @@ async def get_team_ca(team_id: str) -> Certificate:
 
 
 # TODO: The PKI state changes here! Handle accordingly.
-async def mint_certificate(
-    team_id: str, cn: str, server: bool = False
-) -> Certificate:
+async def mint_certificate(team_id: str, cn: str, server: bool = False) -> Certificate:
     ca = await get_team_ca(team_id)
-   
+
     if await get_certificate_by_common_name(cn) is not None:
         logger.warning(f"Certificate for {cn} already exists in the DB, likely rollover")
 
@@ -79,13 +83,17 @@ async def mint_certificate(
 
     await insert_certificate(cert_data)
 
-
-    await redis_client.publish("ahaz_events", json.dumps({
-        "type": "cert",
-        "data": {
-            "type": "created",
-            "common_name": cn,
-        },
-    }))
+    await redis_client.publish(
+        "ahaz_events",
+        json.dumps(
+            {
+                "type": "cert",
+                "data": {
+                    "type": "created",
+                    "common_name": cn,
+                },
+            }
+        ),
+    )
 
     return cert_data

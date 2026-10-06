@@ -56,7 +56,7 @@ from tenacity.retry import retry_base
 from tenacity.stop import stop_base
 from tenacity.wait import wait_base
 
-from .crypto.manager import generate_user, get_server_ovpn_config, get_server_cert, get_ca_pem
+from .crypto.manager import get_ca_pem, get_server_cert, get_server_ovpn_config
 from .db.operator import (
     get_task_definition,
     get_team,
@@ -695,7 +695,7 @@ async def create_team_vpn_configmap(team_id: str) -> None:
                 "ta.key": team.ta_key.hex(),
                 "up.sh": up_script,
                 "down.sh": down_script,
-                "ovpn_env.sh": f"export OVPN_SERVER={K8S_IP_RANGE}"
+                "ovpn_env.sh": f"export OVPN_SERVER={K8S_IP_RANGE}",
             },
         )
 
@@ -749,7 +749,7 @@ async def create_team_vpn_container(team_id: str) -> None:
                                 V1KeyToPath(key="ta.key", path="pki/ta.key"),
                                 V1KeyToPath(key="up.sh", path="up.sh"),
                                 V1KeyToPath(key="down.sh", path="down.sh"),
-                                V1KeyToPath(key="ovpn_env.sh", path="ovpn_env.sh")
+                                V1KeyToPath(key="ovpn_env.sh", path="ovpn_env.sh"),
                             ],
                         ),
                     ),
@@ -836,7 +836,7 @@ def expose_team_vpn_container(team_id: str, port: int) -> None:
         if e.status != 403:
             logger.error(f"API Exception when exposing VPN container for team {team_id}: {e}")
         raise e
-        
+
 
 def delete_namespace(team_id: str, timeout: int = 300, interval: int = 5) -> int:
     load_kube_config()

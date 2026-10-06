@@ -1,8 +1,35 @@
 import asyncio
+
 from .. import controller as k8s
 from ..crypto import manager as cert
-from ..db.models.team import Team
 from ..db import operator as db
+from ..db.models.team import Team
+
+TASKS = {
+    "gen_cert": lambda payload: gen_cert(payload["team_id"]),
+    "create_namespace": lambda payload: create_namespace(payload["team_id"]),
+    "create_vpn_container": lambda payload: create_vpn_container(payload["team_id"]),
+    "expose_vpn_container": lambda payload: expose_vpn_container(payload["team_id"], payload["port"]),
+    "insert_db": lambda payload: insert_db(payload["team_id"], payload["port"]),
+    "register_user": lambda payload: register_user(payload["team_id"], payload["user_id"]),
+    "start_challenge": lambda payload: start_challenge(payload["team_id"], payload["task"]),
+    "stop_challenge": lambda payload: stop_challenge(payload["team_id"], payload["task"]),
+    "delete_team_namespace": lambda payload: delete_team_namespace(payload["team_id"]),
+    "delete_team_certificates": lambda payload: delete_team_certificates(payload["team_id"]),
+    "delete_user_certificate": lambda payload: delete_user_certificate(
+        payload["team_id"], payload["user_id"]
+    ),
+    "delete_team_db": lambda payload: delete_team_db(payload["team_id"]),
+}
+
+
+async def do_work(work_type: str, payload: dict):
+    if work_type not in TASKS:
+        raise Exception(f"Unknown work type: {work_type}")
+
+    r = TASKS[work_type](payload)
+    if asyncio.iscoroutine(r):
+        await r
 
 
 async def gen_cert(team_id: str):
@@ -38,6 +65,7 @@ async def start_challenge(team_id: str, task: str):
 def stop_challenge(team_id: str, task: str):
     k8s.stop_challenge(team_id, task)
 
+
 async def delete_team_namespace(team_id: str):
     k8s.delete_namespace(team_id)
     counter = 0
@@ -47,11 +75,14 @@ async def delete_team_namespace(team_id: str):
     if counter >= 60:
         raise Exception(f"Timeout waiting for namespace {team_id} to be deleted")
 
+
 async def delete_team_certificates(team_id: str):
     await cert.delete_team_certificates(team_id)
 
+
 async def delete_user_certificate(team_id: str, user_id: str):
     await cert.delete_user_certificate(team_id, user_id)
+
 
 async def delete_team_db(team_id: str):
     await db.delete_team(team_id)
