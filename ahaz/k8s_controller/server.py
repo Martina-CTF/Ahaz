@@ -208,6 +208,14 @@ async def update_team(id: str):
         ]
     )
 
+    await work_queue.remove_idempotency_many(
+        [
+            ("delete_team_namespace", {"team_id": id}),
+            ("delete_team_certificates", {"team_id": id}),
+            ("delete_team_db", {"team_id": id}),
+        ]
+    )
+
     logger.debug(f"Enqueued tasks for team {id}: {work_ids}")
 
     team_raw = await get_team_raw(id)
@@ -219,8 +227,23 @@ async def update_team(id: str):
 
 @app.route("/team/<string:id>", methods=["DELETE"])
 async def delete_team(id: str):
-    if not await db.team_exists(id):
+    team = await db.get_team(id)
+    if team is None:
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
+
+    port = team.port
+
+    user_certs = await cert.get_client_certificate_all(id)
+    for user_id in user_certs.keys():
+        work_id = await work_queue.enqueue(
+            Work(
+                id="delete_user_certificate",
+                type="delete_user_certificate",
+                payload={"team_id": id, "user_id": user_id},
+                idempotent_on={"team_id": id, "user_id": user_id},
+            )
+        )
+        logger.debug(f"Enqueued delete_user_certificate for team {id} and user {user_id}: {work_id}")
 
     work_ids = await work_queue.enqueue_many(
         [
@@ -246,6 +269,17 @@ async def delete_team(id: str):
     )
 
     logger.debug(f"Enqueued tasks for deleting team {id}: {work_ids}")
+
+    await work_queue.remove_idempotency_many(
+        [
+            ("gen_cert", {"team_id": id}),
+            ("create_namespace", {"team_id": id}),
+            ("create_vpn_container", {"team_id": id}),
+            ("expose_vpn_container", {"team_id": id, "port": port}),
+            ("insert_db", {"team_id": id, "port": port}),
+            *[("register_user", {"team_id": id, "user_id": user_id}) for user_id in user_certs.keys()],
+        ]
+    )
 
     return json.dumps({"team_id": id, "status": "deleting"}), 202, {"Content-Type": "application/json"}
 
@@ -300,6 +334,9 @@ async def start_challenge(team: str, task: str):
     work_id = await work_queue.enqueue(
         Work(id="start_challenge", type="start_challenge", payload={"team_id": team, "task": task})
     )
+
+    await work_queue.remove_idempotency("stop_challenge", {"team_id": team, "task": task})
+
     logger.debug(f"Enqueued start_challenge for team {team} and task {task}: {work_id}")
 
     return json.dumps({"task": task, "status": "starting"}), 202, {"Content-Type": "application/json"}
@@ -319,6 +356,9 @@ async def stop_task(team: str, task: str):
     work_id = await work_queue.enqueue(
         Work(id="stop_challenge", type="stop_challenge", payload={"team_id": team, "task": task})
     )
+
+    await work_queue.remove_idempotency("start_challenge", {"team_id": team, "task": task})
+
     logger.debug(f"Enqueued stop_challenge for team {team} and task {task}: {work_id}")
 
     pods = filter_pods_by_task(await k8s.get_pods_namespace(team, True), task)
@@ -365,6 +405,7 @@ async def create_user(id: str, user_id: str):
         work_id = await work_queue.enqueue(
             Work(id="register_user", type="register_user", payload={"team_id": id, "user_id": user_id})
         )
+        await work_queue.remove_idempotency("delete_user_certificate", {"team_id": id, "user_id": user_id})
         logger.debug(f"Enqueued register_user for team {id} and user {user_id}: {work_id}")
 
         status = await get_user_raw(id, user_id)
@@ -386,6 +427,12 @@ async def update_user(id: str, user_id: str):
     request_data = await request.get_json()
     if "vpn_config" in request_data:
         status = 202
+        await work_queue.remove_idempotency_many(
+            [
+                ("delete_user_certificate", {"team_id": id, "user_id": user_id}),
+                ("register_user", {"team_id": id, "user_id": user_id}),
+            ]
+        )
         work_ids = await work_queue.enqueue_many(
             [
                 Work(
@@ -423,6 +470,7 @@ async def delete_user(id: str, user_id: str):
             payload={"team_id": id, "user_id": user_id},
         )
     )
+    await work_queue.remove_idempotency("register_user", {"team_id": id, "user_id": user_id})
     logger.debug(f"Enqueued delete_user_certificate for team {id} and user {user_id}: {work_id}")
 
     return json.dumps({"id": user_id, "status": "deleting"}), 202, {"Content-Type": "application/json"}

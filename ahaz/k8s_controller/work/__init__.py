@@ -317,6 +317,15 @@ class WorkQueue:
                 await self.mark_failed(task_id, abandon=True)  # This cannot be executed by any worker
                 continue
 
+    async def remove_idempotency(self, task_type: str, payload: dict) -> None:
+        idempotency_key = _make_idempotency_key(task_type, payload)
+        await self.redis_client.delete(idempotency_key)
+
+    async def remove_idempotency_many(self, tasks: list[tuple[str, dict]]) -> None:
+        await self.redis_client.delete(
+            *[_make_idempotency_key(task_type, payload) for task_type, payload in tasks]
+        )
+
     async def mark_complete(self, task_id: str) -> None:
         await self.redis_client.hset(f"task:{task_id}", mapping={"state": "done", "lease_until": 0})
 
