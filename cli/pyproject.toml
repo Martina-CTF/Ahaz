@@ -1,12 +1,12 @@
 [project]
 name = "ahaz_cli"
-version = "0.0.4"
+version = "0.1.1"
 description = "Command-line management interface for Ahaz"
 dependencies = [
     "docker>=7.1.0",
     "rich>=14.2.0",
     "typer>=0.20.0",
-    "ahaz_common",
+    "ahaz_common>=0.1.0",
     "pyyaml>=6.0.3",
 ]
 

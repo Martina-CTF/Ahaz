@@ -28,7 +28,7 @@ def serialise_task(task: Task) -> str:
     Serialise a Task into YAML with a fixed field order matching the example:
     name, version, description, score, scoring_type, pods, networks, env_vars
     """
-    dictionary = task.model_dump()
+    dictionary = task.model_dump(mode="json")
 
     return yaml.safe_dump(dictionary, sort_keys=False, default_flow_style=False)
 

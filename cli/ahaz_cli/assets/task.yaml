@@ -1,36 +1,29 @@
-name: "My Very Cool Task" # Name of the task; shown to the user
-version: "1.0.0" # Version of the task; used for image tagging, increment when making changes to already-pushed tasks
-description: "Very cool description UwU" # Description of the task; shown to the user
-score: 150 # Maximum score for the task
-scoring_type: "dynamic" # Scoring type; can be "static" or "dynamic"
+name: "very-cool-task"
+version: "1.0.0"
 
-# Definition of the pods that will be created for the task
+info:
+  name: "My Very Cool Task"
+  description: "Very cool description UwU"
+  flag: "flag{VAUEW_VAUEW_VAUEW_VAUEW!!!}"
+
 pods:
-- name: "hello-world" # Name of the pod; used for referencing in networks and env_vars
-  visible_to_user: true # Whether the user can see this pod
-  # Definition of the container image for the pod
-  image:
-    image_name: "hello-world" # Name of the image; used for pulling/building the image
-    build_context: "./hello-world" # Context path for building the image, needs to at least contain a Dockerfile
-  limits_ram: "128Mi" # RAM limit for the pod
-  limits_cpu: 1 # CPU limit for the pod
-  # Testing configuration for the pod; used for `ahaz test` command
-  testing:
-    # Defines ports that will be exposed on the host machine via Docker
+  - name: hello-world
+    visible: true
     exposed_ports:
-    - 1337:80
+      - 8080:8080
+    image:
+      name: hello-world
+      context: ./hello-world
+    limits:
+      ram: 128Mi
+      cpu: 100m
+    network:
+      - name: teamnet
+    env:
+      - name: "cool_var"
+        value: "awesome_var"
 
-# Network definitions for the task
 networks:
-# Teamnet will always contain the VPN pod - use for user-accessible services
-- name: "teamnet" # Name of the network
-  devices: [ "hello-world" ] # Pods connected to this network
-# Other networks are inaccessible to the players
-- name: "super-secret-internal-network"
-  devices: [ "hello-world" ]
-
-# Environment variables to be set in the pods
-env_vars:
-- pod_name: "hello-world" # Pod to which the environment variable will be set
-  name: "COOL_ENV_VAR" # Name of the environment variable
-  value: "hello-world" # Value of the environment variable
+  - name: teamnet
+    access:
+      - player
