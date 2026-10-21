@@ -6,7 +6,6 @@ import sys
 import traceback
 from datetime import datetime, timezone
 from socket import gethostname
-from typing import Any
 
 import redis.asyncio as aioredis
 
@@ -28,24 +27,6 @@ logging.getLogger("kubernetes").setLevel(logging.INFO)
 logging.getLogger("mysql").setLevel(logging.INFO)
 
 
-async def do_work(work_type: str, payload: dict[str, Any]) -> None:
-    match work_type:
-        case "gen_cert":
-            await tasks.gen_cert(payload["team_id"])
-        case "create_namespace":
-            tasks.create_namespace(payload["team_id"])
-        case "create_vpn_container":
-            await tasks.create_vpn_container(payload["team_id"])
-        case "expose_vpn_container":
-            tasks.expose_vpn_container(payload["team_id"], payload["port"])
-        case "insert_db":
-            await tasks.insert_db(payload["team_id"], payload["port"])
-        case "register_user":
-            await tasks.register_user(payload["team_id"], payload["user_id"])
-        case _:
-            raise Exception(f"Unknown work type: {work_type}")
-
-
 async def _worker_loop(worker_id: str, r: aioredis.Redis) -> None:
     logger.info(f"worker started: {worker_id}")
 
@@ -65,11 +46,12 @@ async def _worker_loop(worker_id: str, r: aioredis.Redis) -> None:
                             "state": "started",
                             "id": work.id,
                             "type": work.type,
+                            "payload": work.payload,
                         },
                     }
                 ),
             )
-            await do_work(work.type, work.payload)
+            await tasks.do_work(work.type, work.payload)
             await r.publish(
                 "ahaz_events",
                 json.dumps(

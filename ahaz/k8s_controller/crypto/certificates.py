@@ -27,11 +27,14 @@ def generate_key() -> CertificateIssuerPrivateKeyTypes:
         logger.error(f"Unsupported KEY_ALGO: {KEY_ALGO}")
         raise ValueError(f"Unsupported KEY_ALGO: {KEY_ALGO}")
 
+
 # SHA-384 is widely used in TLS certs, so it's a sensible default
 HASH_FUNCTION = os.getenv("CRYPTO_HASH_FUNCTION", "sha384").lower()
+
+
 def hash_function(key: CertificateIssuerPrivateKeyTypes) -> hashes.HashAlgorithm | None:
     if isinstance(key, (ed25519.Ed25519PrivateKey, ed448.Ed448PrivateKey)):
-        return None # EdDSA algorithms have their hash function defined in-spec; so it must be None.
+        return None  # EdDSA algorithms have their hash function defined in-spec; so it must be None.
     elif HASH_FUNCTION == "sha256":
         return hashes.SHA256()
     elif HASH_FUNCTION == "sha384":
@@ -41,7 +44,6 @@ def hash_function(key: CertificateIssuerPrivateKeyTypes) -> hashes.HashAlgorithm
     else:
         logger.error(f"Unsupported HASH_FUNCTION: {HASH_FUNCTION}")
         raise ValueError(f"Unsupported HASH_FUNCTION: {HASH_FUNCTION}")
-    
 
 
 def create_CA_certificate(key: CertificateIssuerPrivateKeyTypes, cn: str) -> x509.Certificate:
@@ -104,12 +106,8 @@ def create_signed_certificate(
     )
 
     if server:
-        csr = csr.add_extension(
-            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False
-        )
+        csr = csr.add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
     else:
-        csr = csr.add_extension(
-            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False
-        )
+        csr = csr.add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
 
     return csr.sign(ca_key, hash_function(ca_key))  # pyright: ignore[reportArgumentType]
