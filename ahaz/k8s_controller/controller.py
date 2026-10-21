@@ -202,7 +202,7 @@ async def start_challenge_pod(team_id: str, pod: PodInformation, task_name: str,
             spec=V1PodSpec(
                 containers=[
                     V1Container(
-                        image=f"{get_image_name(pod.image)}:{task_version}",
+                        image=f"{get_image_name(pod.image)}:{task_version if pod.image.tag is None else pod.image.tag}",
                         name="container",
                         env=[V1EnvVar(name=var.name, value=var.value) for var in pod.env],
                         resources=V1ResourceRequirements(
