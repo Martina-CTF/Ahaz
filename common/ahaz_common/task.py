@@ -114,7 +114,7 @@ class TaskInformation(BaseModel):
 
 class Task(BaseModel):
     name: str
-    api_version: Optional[str] = "v1"
+    apiVersion: Optional[str] = "v1"
     version: Optional[str] = "1.0.0"
     info: Optional[TaskInformation] = None
     pods: list[PodInformation] = Field(default_factory=list)
