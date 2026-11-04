@@ -57,6 +57,7 @@ class ImageInformation(BaseModel):
     name: str
     context: Optional[str] = None
     registry: Optional[str] = None
+    tag: Optional[str] = None
 
     build_args: list[EnvironmentInformation] = Field(default_factory=list)
 
@@ -113,7 +114,7 @@ class TaskInformation(BaseModel):
 
 class Task(BaseModel):
     name: str
-    api_version: Optional[str] = "v1"
+    apiVersion: Optional[str] = "v1"
     version: Optional[str] = "1.0.0"
     info: Optional[TaskInformation] = None
     pods: list[PodInformation] = Field(default_factory=list)

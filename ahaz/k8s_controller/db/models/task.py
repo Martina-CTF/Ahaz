@@ -24,6 +24,7 @@ class LimitInformationDoc(TypedDict):
 
 class ImageInformationDoc(TypedDict):
     name: str
+    tag: Optional[str]
     registry: Optional[str]
 
 
@@ -43,7 +44,7 @@ class TaskInformationDoc(TypedDict):
 
 class TaskDoc(TypedDict):
     name: str
-    api_version: Optional[str]
+    apiVersion: Optional[str]
     version: Optional[str]
     version_serialized: list[int]
 
@@ -56,7 +57,7 @@ def pod_to_pod_doc(pod: PodInformation) -> PodInformationDoc:
     return PodInformationDoc(
         name=pod.name,
         visible=pod.visible,
-        image=ImageInformationDoc(name=pod.image.name, registry=pod.image.registry),
+        image=ImageInformationDoc(name=pod.image.name, registry=pod.image.registry, tag=pod.image.tag),
         limits=LimitInformationDoc(
             ram=pod.limits.ram, cpu=pod.limits.cpu, ephemeral_storage=pod.limits.ephemeral_storage
         ),
@@ -75,7 +76,7 @@ def network_to_network_doc(net: NetworkInformation) -> NetworkInformationDoc:
 def task_to_task_doc(task: Task) -> TaskDoc:
     return TaskDoc(
         name=task.name,
-        api_version=task.api_version,
+        apiVersion=task.apiVersion,
         version=task.version,
         # This makes sorting/querying by version easier/faster, it does not matter anywhere but the DB layer.
         version_serialized=[int(x) for x in task.version.split(".")] if task.version else [],
