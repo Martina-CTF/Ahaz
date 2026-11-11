@@ -682,6 +682,8 @@ async def create_team_vpn_configmap(team_id: str) -> None:
         basedir = Path(__file__).parent
         up_script = (basedir / "assets" / "up.sh").read_text()
         down_script = (basedir / "assets" / "down.sh").read_text()
+        # Move to a template if we end up needing to define more env vars..
+        openvpn_env = "\n".join(["export OVPN_SERVER=192.168.255.0/24", "export OVPN_NAT=1"])
 
         config_map = V1ConfigMap(
             api_version="v1",
@@ -695,7 +697,7 @@ async def create_team_vpn_configmap(team_id: str) -> None:
                 "ta.key": team.ta_key.hex(),
                 "up.sh": up_script,
                 "down.sh": down_script,
-                "ovpn_env.sh": f"export OVPN_SERVER={K8S_IP_RANGE}",
+                "ovpn_env.sh": openvpn_env,
             },
         )
 

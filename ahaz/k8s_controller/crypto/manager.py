@@ -82,7 +82,6 @@ async def get_server_cert(team_id: str) -> Certificate | None:
 async def get_client_ovpn_config(
     user_id: str,
     team_id: str,
-    ovpn_port: int = 1194,
     ovpn_proto: list[str] | None = None,
     ovpn_extra_client_config: list[str] | None = None,
 ) -> str | None:
@@ -106,8 +105,8 @@ async def get_client_ovpn_config(
         return None
 
     return client_conf.render(
-        cn=f"{user_id}.{team_id}.{PUBLIC_DOMAINNAME}",
-        port=ovpn_port,
+        cn=f"{PUBLIC_DOMAINNAME}",
+        port=team.port,
         protocols=ovpn_proto,
         additional_options=ovpn_extra_client_config,
         key=client_cert.get_private_key_pem(),
@@ -142,7 +141,6 @@ async def get_server_ovpn_config(
         raise ValueError(f"Team {team_id} not found when generating server config")
 
     return openvpn_conf.render(
-        cn=f"server.{team_id}.{PUBLIC_DOMAINNAME}",
         port=ovpn_port,
         protocols=ovpn_proto,
         additional_options=ovpn_extra_server_config,
