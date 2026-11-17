@@ -175,7 +175,7 @@ async def delete_cert_by_common_name(common_name: str) -> bool:
     """
     database = await get_context()
 
-    result = await database.collections.certificates.delete_one({"common_name": common_name})
+    result = await database.collections.certificates.delete_many({"common_name": common_name})
 
     if result.deleted_count == 0:
         return False

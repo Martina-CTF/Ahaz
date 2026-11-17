@@ -73,6 +73,19 @@ async def _worker_loop(worker_id: str, r: aioredis.Redis) -> None:
             logger.debug(f"Error processing task {work.id}:")
             traceback.print_exc()
             await queue.mark_failed(work.id)
+            await r.publish(
+                "ahaz_events",
+                json.dumps(
+                    {
+                        "type": "work",
+                        "data": {
+                            "state": "failed",
+                            "id": work.id,
+                            "type": work.type,
+                        },
+                    }
+                ),
+            )
 
 
 # Requeues abandoned tasks whose leases have expired. Should be run seperately as a singleton.

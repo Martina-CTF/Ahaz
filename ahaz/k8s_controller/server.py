@@ -274,7 +274,7 @@ async def delete_team(id: str):
             ("create_namespace", {"team_id": id}),
             ("create_vpn_container", {"team_id": id}),
             ("expose_vpn_container", {"team_id": id, "port": port}),
-            ("insert_db", {"team_id": id, "port": port}),
+            ("insert_db", {"team_id": id}),
             *[("register_user", {"team_id": id, "user_id": user_id}) for user_id in user_certs.keys()],
         ]
     )
