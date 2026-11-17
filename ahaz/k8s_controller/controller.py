@@ -187,6 +187,7 @@ def create_network_policy(team_id: str) -> V1NetworkPolicy:
 async def start_challenge_pod(team_id: str, pod: PodInformation, task_name: str, task_version: str) -> None:
     load_kube_config()
     try:
+        task_image_tag = task_version if pod.image.tag is None else pod.image.tag
         core_api = CoreV1Api()
         pod_manifest = V1Pod(
             metadata=V1ObjectMeta(
@@ -202,7 +203,7 @@ async def start_challenge_pod(team_id: str, pod: PodInformation, task_name: str,
             spec=V1PodSpec(
                 containers=[
                     V1Container(
-                        image=f"{get_image_name(pod.image)}:{task_version if pod.image.tag is None else pod.image.tag}",
+                        image=f"{get_image_name(pod.image)}:{task_image_tag}",
                         name="container",
                         env=[V1EnvVar(name=var.name, value=var.value) for var in pod.env],
                         resources=V1ResourceRequirements(
