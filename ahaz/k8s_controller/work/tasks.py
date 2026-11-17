@@ -1,30 +1,88 @@
-from .. import controller
-from ..crypto.manager import gen_ta_key, gen_team, generate_user
+import asyncio
+
+from .. import controller as k8s
+from ..crypto import manager as cert
+from ..db import operator as db
 from ..db.models.team import Team
-from ..db.operator import set_team
+
+TASKS = {
+    "gen_cert": lambda payload: gen_cert(payload["team_id"]),
+    "create_namespace": lambda payload: create_namespace(payload["team_id"]),
+    "create_vpn_container": lambda payload: create_vpn_container(payload["team_id"]),
+    "expose_vpn_container": lambda payload: expose_vpn_container(payload["team_id"], payload["port"]),
+    "insert_db": lambda payload: insert_db(payload["team_id"], payload["port"]),
+    "register_user": lambda payload: register_user(payload["team_id"], payload["user_id"]),
+    "start_challenge": lambda payload: start_challenge(payload["team_id"], payload["task"]),
+    "stop_challenge": lambda payload: stop_challenge(payload["team_id"], payload["task"]),
+    "delete_team_namespace": lambda payload: delete_team_namespace(payload["team_id"]),
+    "delete_team_certificates": lambda payload: delete_team_certificates(payload["team_id"]),
+    "delete_user_certificate": lambda payload: delete_user_certificate(
+        payload["team_id"], payload["user_id"]
+    ),
+    "delete_team_db": lambda payload: delete_team_db(payload["team_id"]),
+}
+
+
+async def do_work(work_type: str, payload: dict):
+    if work_type not in TASKS:
+        raise Exception(f"Unknown work type: {work_type}")
+
+    r = TASKS[work_type](payload)
+    if asyncio.iscoroutine(r):
+        await r
 
 
 async def gen_cert(team_id: str):
-    await gen_team(team_id)
+    await cert.gen_team(team_id)
 
 
 def create_namespace(team_id: str):
-    controller.create_team_namespace(team_id)
+    k8s.create_team_namespace(team_id)
 
 
 async def create_vpn_container(team_id: str):
-    await controller.create_team_vpn_container(team_id)
+    await k8s.create_team_vpn_container(team_id)
 
 
 def expose_vpn_container(team_id: str, port: int):
-    controller.expose_team_vpn_container(team_id, port)
+    k8s.expose_team_vpn_container(team_id, port)
 
 
 async def insert_db(team_id: str, port: int):
-    ta_key = gen_ta_key()
+    ta_key = cert.gen_ta_key()
     team = Team(team_id=team_id, port=port, ta_key=ta_key)
-    await set_team(team)
+    await db.set_team(team)
 
 
 async def register_user(team_id: str, user_id: str):
-    await generate_user(team_id, user_id)
+    await cert.generate_user(team_id, user_id)
+
+
+async def start_challenge(team_id: str, task: str):
+    await k8s.start_challenge(team_id, task)
+
+
+def stop_challenge(team_id: str, task: str):
+    k8s.stop_challenge(team_id, task)
+
+
+async def delete_team_namespace(team_id: str):
+    k8s.delete_namespace(team_id)
+    counter = 0
+    while k8s.check_namespace_exists(team_id) and counter < 60:
+        await asyncio.sleep(1)
+        counter += 1
+    if counter >= 60:
+        raise Exception(f"Timeout waiting for namespace {team_id} to be deleted")
+
+
+async def delete_team_certificates(team_id: str):
+    await cert.delete_team_certificates(team_id)
+
+
+async def delete_user_certificate(team_id: str, user_id: str):
+    await cert.delete_user_certificate(team_id, user_id)
+
+
+async def delete_team_db(team_id: str):
+    await db.delete_team(team_id)
