@@ -2,7 +2,7 @@ client
 nobind
 dev tun
 remote-cert-tls server
-remote {{cn}} {{port}}
+remote {{remote}} {{port}}
 {% for proto in protocols %}
 proto {{proto}}
 {% endfor %}

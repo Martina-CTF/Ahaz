@@ -105,7 +105,7 @@ async def get_client_ovpn_config(
         return None
 
     return client_conf.render(
-        cn=f"{PUBLIC_DOMAINNAME}",
+        remote=f"{PUBLIC_DOMAINNAME}",
         port=team.port,
         protocols=ovpn_proto,
         additional_options=ovpn_extra_client_config,
