@@ -57,6 +57,7 @@ class ImageInformation(BaseModel):
     name: str
     context: Optional[str] = None
     registry: Optional[str] = None
+    tag: Optional[str] = None
 
     build_args: list[EnvironmentInformation] = Field(default_factory=list)
 
