@@ -115,9 +115,6 @@ async def get_client_ovpn_config(
         logger.warning(f"Team {team_id} not found when generating client config for user {user_id}")
         return None
 
-    ta_key = str(team.ta_key.hex())
-    ta_key = wrap_lines(ta_key, 64)
-
     return client_conf.render(
         remote=f"{PUBLIC_DOMAINNAME}",
         port=team.port,
@@ -126,7 +123,7 @@ async def get_client_ovpn_config(
         key=client_cert.get_private_key_pem(),
         cert=client_cert.get_certificate_pem(),
         ca=ca_pem,
-        ta=ta_key,
+        ta=wrap_lines(team.ta_key.hex(), 64),
         pod_network=pod_net,
         pod_network_mask=pod_mask,
     )
@@ -154,9 +151,6 @@ async def get_server_ovpn_config(
     if team is None:
         raise ValueError(f"Team {team_id} not found when generating server config")
 
-    ta_key = str(team.ta_key.hex())
-    ta_key = wrap_lines(ta_key, 64)
-
     return openvpn_conf.render(
         port=ovpn_port,
         protocols=ovpn_proto,
@@ -164,7 +158,7 @@ async def get_server_ovpn_config(
         key=server_cert.get_private_key_pem(),
         cert=server_cert.get_certificate_pem(),
         ca=ca_pem,
-        ta=ta_key,
+        ta=wrap_lines(team.ta_key.hex(), 64),
     )
 
 
