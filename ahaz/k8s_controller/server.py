@@ -74,10 +74,11 @@ async def update_task(id: str):
         logger.error(f"Value error: {e}")
         return {"error": str(e)}, 400, {"Content-Type": "application/json"}
 
-    existing_task = await db.get_task_definition(id)
+    existing_task = await db.get_task_definition_version(task.name, task.version)
     if existing_task is not None and existing_task.model_dump_json() == task.model_dump_json():
         return existing_task.model_dump_json(), 200, {"Content-Type": "application/json"}
 
+    # New version -> added alongside previous ones; same version with changes -> replaced in place
     await db.insert_task_definition(task)
 
     return task.model_dump_json(), 201, {"Content-Type": "application/json"}
@@ -85,10 +86,30 @@ async def update_task(id: str):
 
 @app.route("/task/<string:id>", methods=["DELETE"])
 async def delete_task(id: str):
-    if not await db.delete_task_definition(id):
+    # By default only the latest version is deleted, rolling back to the previous one.
+    # `?all=true` deletes every version of the task.
+    all_versions = request.args.get("all", "false").lower() == "true"
+    if not await db.delete_task_definition(id, all_versions=all_versions):
         return {"error": "Task not found"}, 404, {"Content-Type": "application/json"}
 
     return Response(None, status=204)
+
+
+TEAM_CREATE_WORK_TYPES = (
+    "gen_cert",
+    "create_namespace",
+    "create_vpn_container",
+    "expose_vpn_container",
+    "insert_db",
+)
+
+
+def team_create_idempotency(team_id: str) -> list[tuple[str, dict]]:
+    """
+    Idempotency keys of the team creation work. All of it is idempotent on `{"team_id": ...}` only,
+    so the same payload MUST be used when clearing the keys, or a recreated team will reuse stale work.
+    """
+    return [(work_type, {"team_id": team_id}) for work_type in TEAM_CREATE_WORK_TYPES]
 
 
 @app.route("/team", methods=["GET"])
@@ -229,8 +250,6 @@ async def delete_team(id: str):
     if team is None:
         return {"error": "Team not found"}, 404, {"Content-Type": "application/json"}
 
-    port = team.port
-
     user_certs = await cert.get_client_certificate_all(id)
     for user_id in user_certs.keys():
         work_id = await work_queue.enqueue(
@@ -270,11 +289,7 @@ async def delete_team(id: str):
 
     await work_queue.remove_idempotency_many(
         [
-            ("gen_cert", {"team_id": id}),
-            ("create_namespace", {"team_id": id}),
-            ("create_vpn_container", {"team_id": id}),
-            ("expose_vpn_container", {"team_id": id, "port": port}),
-            ("insert_db", {"team_id": id}),
+            *team_create_idempotency(id),
             *[("register_user", {"team_id": id, "user_id": user_id}) for user_id in user_certs.keys()],
         ]
     )
