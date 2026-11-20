@@ -74,6 +74,7 @@ PUBLIC_DOMAINNAME = os.getenv("PUBLIC_DOMAINNAME", "ahaz.lan")
 K8S_IMAGEPULLSECRET_NAMESPACE = os.getenv("K8S_IMAGEPULLSECRET_NAMESPACE", "default")
 K8S_IMAGEPULLSECRET_NAME = os.getenv("K8S_IMAGEPULLSECRET_NAME", "regcred")
 K8S_IP_RANGE = os.getenv("K8S_IP_RANGE")
+K8S_NAMESPACE_PREFIX = os.getenv("K8S_NAMESPACE_PREFIX", "ahaz-")
 CERT_DIR_CONTAINER = os.getenv("CERT_DIR_CONTAINER", "/etc/ahaz/certs/")
 OVPN_IMAGE = os.getenv("OVPN_IMAGE", "lisenet/openvpn")
 OVPN_TAG = os.getenv("OVPN_TAG", "latest")
@@ -125,6 +126,10 @@ def should_retry_patch(exception):
         # Possible we are patching something not created yet
         isinstance(exception, ApiException) and exception.status == 404
     )
+
+
+def get_namespace_name(team_id):
+    return K8S_NAMESPACE_PREFIX + team_id  # simple as that
 
 
 class RetryOpts(TypedDict):
@@ -249,7 +254,7 @@ async def start_challenge_pod(team_id: str, pod: PodInformation, task_name: str,
         logger.debug(f"Creating pod {pod.name} in namespace {team_id} with image {pod.image.name}")
         logger.debug(f"Pod manifest: {pod_manifest}")
 
-        core_api.create_namespaced_pod(namespace=team_id, body=pod_manifest)
+        core_api.create_namespaced_pod(namespace=get_namespace_name(team_id), body=pod_manifest)
         create_pod_service(team_id, task_name, pod.name)
     except ApiException as e:
         if e.status != 403:
@@ -375,7 +380,7 @@ def create_pod_service(team_name: str, task_name: str, pod_name: str) -> None:
         service = V1Service(
             metadata=V1ObjectMeta(
                 name=pod_name,
-                namespace=team_name,
+                namespace=get_namespace_name(team_name),
                 labels={"task": task_name},
             ),
             spec=V1ServiceSpec(
@@ -385,7 +390,9 @@ def create_pod_service(team_name: str, task_name: str, pod_name: str) -> None:
         )
 
         # Create the service in Kubernetes
-        api_response: V1Service = core_api.create_namespaced_service(namespace=team_name, body=service)
+        api_response: V1Service = core_api.create_namespaced_service(
+            namespace=get_namespace_name(team_name), body=service
+        )
         logger.debug(f"Service created. Status='{api_response.status}'")
     except ApiException as e:
         if e.status != 403:
@@ -467,7 +474,7 @@ async def create_challenge_network_policies(task: Task, team_id: str) -> None:
     try:
         net_api = NetworkingV1Api()
         deny_policy = create_network_policy_deny_all_task(task.name)
-        net_api.create_namespaced_network_policy(namespace=team_id, body=deny_policy)
+        net_api.create_namespaced_network_policy(namespace=get_namespace_name(team_id), body=deny_policy)
 
         for network in task.networks:
             network_pods = [x.name for x in task.pods if network.name in x.networks]
@@ -476,7 +483,7 @@ async def create_challenge_network_policies(task: Task, team_id: str) -> None:
                 network_pods.append("vpn-container-pod")
 
             allow_policy = create_network_policy_allow_task(task.name, network_pods, network.name)
-            net_api.create_namespaced_network_policy(namespace=team_id, body=allow_policy)
+            net_api.create_namespaced_network_policy(namespace=get_namespace_name(team_id), body=allow_policy)
 
     except ApiException as e:
         if e.status != 403:
@@ -494,7 +501,7 @@ def stop_challenge(team_id: str, task_name: str) -> str:
         label_selector = f"task={task_name}"
 
         # Delete Pods
-        pod_list: V1PodList = core_api.list_namespaced_pod(namespace=team_id, label_selector=label_selector)
+        pod_list: V1PodList = core_api.list_namespaced_pod(namespace=get_namespace_name(team_id), label_selector=label_selector)
 
         if not pod_list.items:
             logger.info(f"No pods found with label task={task_name} in namespace {team_id}")
@@ -504,19 +511,19 @@ def stop_challenge(team_id: str, task_name: str) -> str:
                     logger.warning(f"Pod in namespace {team_id} is missing metadata.")
                     continue
                 logger.debug(f"Deleting Pod: {pod.metadata.name}")
-                core_api.delete_namespaced_pod(name=pod.metadata.name, namespace=team_id)
+                core_api.delete_namespaced_pod(name=pod.metadata.name, namespace=get_namespace_name(team_id))
 
         # Delete Services
-        services = core_api.list_namespaced_service(namespace=team_id, label_selector=label_selector)
+        services = core_api.list_namespaced_service(namespace=get_namespace_name(team_id), label_selector=label_selector)
         for svc in services.items:
             logger.debug(f"Deleting Service: {svc.metadata.name}")
-            core_api.delete_namespaced_service(name=svc.metadata.name, namespace=team_id)
+            core_api.delete_namespaced_service(name=svc.metadata.name, namespace=get_namespace_name(team_id))
 
         # Delete NetworkPolicies
-        policies = net_api.list_namespaced_network_policy(namespace=team_id, label_selector=label_selector)
+        policies = net_api.list_namespaced_network_policy(namespace=get_namespace_name(team_id), label_selector=label_selector)
         for policy in policies.items:
             logger.info(f"Deleting NetworkPolicy: {policy.metadata.name}")
-            net_api.delete_namespaced_network_policy(name=policy.metadata.name, namespace=team_id)
+            net_api.delete_namespaced_network_policy(name=policy.metadata.name, namespace=get_namespace_name(team_id))
 
         logger.info(f"All resources with label task={task_name} deleted from namespace {team_id}")
         return f"All resources with label task={task_name} deleted from namespace {team_id}"
@@ -531,7 +538,7 @@ def create_secret_in_namespace(team_id: str, secret_data: V1Secret) -> None:
     load_kube_config()
     try:
         core_api = CoreV1Api()
-        core_api.create_namespaced_secret(namespace=team_id, body=secret_data)
+        core_api.create_namespaced_secret(namespace=get_namespace_name(team_id), body=secret_data)
         logger.debug(f"Created secret {secret_data.metadata.name} in namespace {team_id}")
     except ApiException as e:
         if e.status != 403:
@@ -546,7 +553,7 @@ def check_namespaced_service_account_exists(namespace: str, service_account_name
     load_kube_config()
     try:
         core_api = CoreV1Api()
-        core_api.read_namespaced_service_account(name=service_account_name, namespace=namespace)
+        core_api.read_namespaced_service_account(name=service_account_name, namespace=get_namespace_name(namespace))
         logger.debug(f"Service account {service_account_name} exists in namespace {namespace}")
         return True
     except ApiException as e:
@@ -597,7 +604,7 @@ def patch_namespaced_service_account(
 
     try:
         core_api = CoreV1Api()
-        core_api.patch_namespaced_service_account(name=service_account_name, namespace=namespace, body=body)
+        core_api.patch_namespaced_service_account(name=service_account_name, namespace=get_namespace_name(namespace), body=body)
         logger.debug(f"Patched service account {service_account_name} in namespace {namespace}")
     except ApiException as e:
         if e.status not in (403, 404):
@@ -625,7 +632,7 @@ def create_team_namespace(team_id: str) -> None:
     try:
         core_api = CoreV1Api()
         logger.debug(f"Creating namespace {team_id}")
-        core_api.create_namespace(V1Namespace(metadata=V1ObjectMeta(name=team_id)))
+        core_api.create_namespace(V1Namespace(metadata=V1ObjectMeta(name=get_namespace_name(team_id))))
         logger.debug(f"Moving regcred into namespace {team_id}")
 
         regcred: V1Secret = core_api.read_namespaced_secret(
@@ -641,7 +648,7 @@ def create_team_namespace(team_id: str) -> None:
         create_secret_in_namespace(team_id, regcred)
         # patch the default service account to disallow auto-mounting of the token
         patch_namespaced_service_account(
-            namespace=team_id,
+            namespace=get_namespace_name(team_id),
             service_account_name="default",
             body=V1ServiceAccount(automount_service_account_token=False),
         )
@@ -702,7 +709,7 @@ async def create_team_vpn_configmap(team_id: str) -> None:
             },
         )
 
-        core_api.create_namespaced_config_map(namespace=team_id, body=config_map)
+        core_api.create_namespaced_config_map(namespace=get_namespace_name(team_id), body=config_map)
         logger.debug(f"Created ConfigMap vpn-config-{team_id} in namespace {team_id}")
     except ApiException as e:
         if e.status != 403:
@@ -781,7 +788,7 @@ async def create_team_vpn_container(team_id: str) -> None:
                 ),
             ),
         )
-        core_api.create_namespaced_pod(body=pod_manifest, namespace=team_id)
+        core_api.create_namespaced_pod(body=pod_manifest, namespace=get_namespace_name(team_id))
     except ApiException as e:
         if e.status != 403:
             logger.error(f"API Exception when creating VPN container for team {team_id}: {e}")
@@ -797,7 +804,7 @@ def expose_team_vpn_container(team_id: str, port: int) -> None:
         service = V1Service(
             metadata=V1ObjectMeta(
                 name="vpn-container-service",
-                namespace=team_id,
+                namespace=get_namespace_name(team_id),
             ),
             spec=V1ServiceSpec(
                 selector={"name": "vpn-container-pod"},  # Selector to match the pod labels
@@ -812,7 +819,7 @@ def expose_team_vpn_container(team_id: str, port: int) -> None:
             ),
         )
         api_service_response: V1Service = core_api.create_namespaced_service(
-            namespace=team_id,
+            namespace=get_namespace_name(team_id),
             body=service,
         )
         logger.debug(f"Service created. Status: '{api_service_response.status}'")
@@ -826,12 +833,12 @@ def expose_team_vpn_container(team_id: str, port: int) -> None:
         net_api = NetworkingV1Api()
         logger.debug("Applying network policies...")
         api_network_response: V1NetworkPolicy = net_api.create_namespaced_network_policy(
-            namespace=team_id, body=policy
+            namespace=get_namespace_name(team_id), body=policy
         )
         logger.debug(f"Restrict-vpn-access policy created. Status: '{api_network_response}'")
 
         api_network_response_deny: V1NetworkPolicy = net_api.create_namespaced_network_policy(
-            namespace=team_id, body=policy_deny
+            namespace=get_namespace_name(team_id), body=policy_deny
         )
         logger.debug(f"Deny-all policy created. Status: '{api_network_response_deny}'")
         logger.debug("Successfully applied network policy")
