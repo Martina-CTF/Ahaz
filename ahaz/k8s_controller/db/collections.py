@@ -10,6 +10,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from ..util.misc import str_to_bool
 from .models.certificate import CertificateDoc
 from .models.deployment import TaskDeploymentDoc
+from .models.reservations import PortReservationDoc
 from .models.task import TaskDoc
 from .models.team import TeamDoc
 
@@ -42,6 +43,7 @@ class Collections:
     task_definitions: AsyncCollection[TaskDoc]
     teams: AsyncCollection[TeamDoc]
     task_deployments: AsyncCollection[TaskDeploymentDoc]
+    port_reservations: AsyncCollection[PortReservationDoc]
 
 
 @dataclass(slots=True)
@@ -64,6 +66,12 @@ async def init_indexes(collections: Collections) -> None:
     # Teams
     # 1. There cannot be more than one team with the same team id
     await collections.teams.create_index("team_id", unique=True)
+
+    # Port Reservations
+    # 1. Port reservations are unique over ports
+    await collections.port_reservations.create_index("port", unique=True)
+    # 2. Port reservations are unique over teams
+    await collections.port_reservations.create_index("team_id", unique=True)
 
     # Task Deployments
     # 1. There cannot be more than one deployment of the same task for the same team at the same time
@@ -117,6 +125,7 @@ async def get_context() -> MongoContext:
                 task_definitions=db["task_definitions"],
                 teams=db["teams"],
                 task_deployments=db["task_deployments"],
+                port_reservations=db["port_reservations"]
             ),
         )
 
