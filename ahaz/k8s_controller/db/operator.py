@@ -2,6 +2,7 @@ import logging
 from os import getenv
 
 from ahaz_common.task import Task
+from pymongo.errors import DuplicateKeyError
 
 from .collections import get_context
 from .models.certificate import Certificate, CertificateDoc, extract_public_cert
@@ -9,6 +10,9 @@ from .models.task import TaskDoc, task_to_task_doc
 from .models.team import Team, TeamDoc
 
 K8S_IP_RANGE = getenv("K8S_IP_RANGE", "10.42.0.0 255.255.0.0")
+
+TEAM_PORT_RANGE_START = int(getenv("TEAM_PORT_RANGE_START", 31000))
+TEAM_PORT_RANGE_END = int(getenv("TEAM_PORT_RANGE_END", 32767))
 
 logger = logging.getLogger()
 
@@ -145,16 +149,55 @@ async def delete_team(team_id: str) -> bool:
 
     result = await database.collections.teams.delete_one({"team_id": team_id})
 
+    await release_port(team_id) # guess they won't be needing this anymore :3
+
     if result.deleted_count == 0:
         return False
 
     return True
 
 
-async def list_ports() -> list[int]:
+async def reserve_port(team_id: str) -> int | None:
     database = await get_context()
 
-    return await database.collections.teams.distinct("port")
+    # If a team already has a reserved port (somehow this gets called twice), return the port they own.
+    already_reserved = await database.collections.port_reservations.find_one({"team_id": team_id})
+    if already_reserved is not None:
+        return already_reserved["port"]
+
+    used_ports = set(
+        await database.collections.port_reservations.distinct("port")
+    )
+
+    # Loops through the available port range, attempting to see if the port is available via insert.
+    for port in range(
+        TEAM_PORT_RANGE_START,
+        TEAM_PORT_RANGE_END + 1,
+    ):
+        if port in used_ports:
+            continue # do not hit the DB if we can help it
+
+        try:
+            await database.collections.port_reservations.insert_one({
+                "port": port,
+                "team_id": team_id,
+            })
+            return port
+
+        except DuplicateKeyError:
+            continue
+
+    return None
+
+
+async def release_port(team_id: str) -> bool:
+    database = await get_context()
+
+    result = await database.collections.port_reservations.delete_one({
+        "team_id": team_id,
+    })
+
+    return result.deleted_count > 0
 
 
 async def insert_certificate(cert: Certificate) -> None:

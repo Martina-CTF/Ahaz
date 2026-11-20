@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-import random
 from asyncio.subprocess import Process
 from threading import Thread
 from typing import TypedDict
@@ -164,23 +163,7 @@ async def update_team(id: str):
         return team_raw, 200, {"Content-Type": "application/json"}
 
     # Get unused port
-    used_ports = await db.list_ports()
-    random.shuffle(used_ports)  # God help me if a port collision actually happens.
-
-    port = None
-
-    if len(used_ports) == 0:
-        port = TEAM_PORT_RANGE_START
-    else:
-        for used_port in used_ports:
-            if used_port < TEAM_PORT_RANGE_START:
-                continue
-
-            if used_port + 1 in used_ports:
-                continue
-
-            port = used_port + 1
-            break
+    port = await db.reserve_port(id)
 
     if port is None:
         return {"error": "No available ports"}, 500, {"Content-Type": "application/json"}
