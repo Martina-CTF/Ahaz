@@ -655,7 +655,7 @@ def create_team_namespace(team_id: str) -> None:
             logger.error(f"Secret {K8S_IMAGEPULLSECRET_NAME} is missing metadata.")
             raise Exception(f"Secret {K8S_IMAGEPULLSECRET_NAME} is missing metadata.")
 
-        regcred.metadata.namespace = team_id
+        regcred.metadata.namespace = get_namespace_name(team_id)
         regcred.metadata.resource_version = None
         create_secret_in_namespace(team_id, regcred)
         # patch the default service account to disallow auto-mounting of the token
