@@ -219,6 +219,8 @@ async def start_challenge_pod(team_id: str, pod: PodInformation, task_name: str,
                                 "ephemeral-storage": "0",
                             },
                         ),
+                        # this should fiiiiiiine
+                        security_context=V1SecurityContext(capabilities=V1Capabilities(add=["SYS_CHROOT"])),
                     )
                 ],
                 tolerations=[
