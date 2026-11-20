@@ -34,6 +34,17 @@ def gen_ta_key() -> bytes:
     return os.urandom(256)  # 2048-bit random key
 
 
+def wrap_lines(text: str, max_length: int = 64) -> str:
+    if len(text) <= max_length:
+        return text
+    
+    chunks  = []
+    for i in range(0, len(text), max_length):
+        chunk = text[i:i + max_length]
+        chunks.append(chunk)
+
+    return "\n".join(chunks)
+
 async def gen_team(team_id: str):
     try:
         await generate_ca(team_id)  # Generate CA
@@ -112,7 +123,7 @@ async def get_client_ovpn_config(
         key=client_cert.get_private_key_pem(),
         cert=client_cert.get_certificate_pem(),
         ca=ca_pem,
-        ta=team.ta_key.hex(),
+        ta=wrap_lines(team.ta_key.hex(), 64),
         pod_network=pod_net,
         pod_network_mask=pod_mask,
     )
@@ -147,7 +158,7 @@ async def get_server_ovpn_config(
         key=server_cert.get_private_key_pem(),
         cert=server_cert.get_certificate_pem(),
         ca=ca_pem,
-        ta=team.ta_key.hex(),
+        ta=wrap_lines(team.ta_key.hex(), 64),
     )
 
 

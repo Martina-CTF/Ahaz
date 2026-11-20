@@ -20,17 +20,50 @@ async def list_challenges() -> list[str]:
 
 
 async def insert_task_definition(task: Task) -> None:
+    """
+    Inserts a new version of a task definition. Re-publishing an existing version replaces it in place.
+    """
     database = await get_context()
 
     task_doc = task_to_task_doc(task)
 
-    await database.collections.task_definitions.insert_one(task_doc)
+    await database.collections.task_definitions.replace_one(
+        {"name": task.name, "version": task.version}, task_doc, upsert=True
+    )
+
+
+async def _latest_task_doc(name: str) -> TaskDoc | None:
+    database = await get_context()
+
+    docs: list[TaskDoc] = await database.collections.task_definitions.find({"name": name}).to_list(
+        length=None
+    )
+
+    if not docs:
+        return None
+
+    # Sorted in Python, since MongoDB sorts array fields by their min/max element, not lexicographically.
+    return max(docs, key=lambda doc: tuple(doc.get("version_serialized") or []))
 
 
 async def get_task_definition(name: str) -> Task | None:
+    """
+    Returns the latest (highest) version of a task definition.
+    """
+    task = await _latest_task_doc(name)
+
+    if task is None:
+        return None
+
+    return Task.model_validate(task)
+
+
+async def get_task_definition_version(name: str, version: str | None) -> Task | None:
     database = await get_context()
 
-    task: TaskDoc | None = await database.collections.task_definitions.find_one({"name": name})
+    task: TaskDoc | None = await database.collections.task_definitions.find_one(
+        {"name": name, "version": version}
+    )
 
     if task is None:
         return None
@@ -46,10 +79,23 @@ async def task_definition_exists(name: str) -> bool:
     return task is not None
 
 
-async def delete_task_definition(name: str) -> bool:
+async def delete_task_definition(name: str, all_versions: bool = False) -> bool:
+    """
+    Deletes the latest version of a task definition, rolling back to the previous version (if any).
+    With `all_versions`, deletes every version of the task.
+    """
     database = await get_context()
 
-    result = await database.collections.task_definitions.delete_one({"name": name})
+    if all_versions:
+        result = await database.collections.task_definitions.delete_many({"name": name})
+        return result.deleted_count > 0
+
+    latest = await _latest_task_doc(name)
+    if latest is None:
+        return False
+
+    latest_id = latest["_id"]  # type: ignore  # _id is added by MongoDB, not part of TaskDoc
+    result = await database.collections.task_definitions.delete_one({"_id": latest_id})
 
     if result.deleted_count == 0:
         return False

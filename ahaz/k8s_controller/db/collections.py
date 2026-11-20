@@ -70,10 +70,16 @@ async def init_indexes(collections: Collections) -> None:
     await collections.task_deployments.create_index([("team_id", 1), ("task_name", 1)], unique=True)
 
     # Task Definitions
-    # 1. Task defs should be immutable, thus, there cannot be more than one task def
-    # with the same name and version. If we want to change sth, that's a new version.
-    # Considering that version_serialized is derived from version, this indirectly enforces on version as well
-    await collections.task_definitions.create_index([("name", 1), ("version_serialized", -1)], unique=True)
+    # 1. There cannot be more than one task def with the same name and version. Multiple versions of
+    # the same task are kept; the highest version is the active one.
+    # NB: the uniqueness must be on the `version` string, NOT on `version_serialized`. The latter is an
+    # array, which makes MongoDB build a multikey index that enforces uniqueness per array *element*
+    # (so 1.0.1 would collide with 1.0.0). Drop that legacy index if it exists.
+    legacy_index = "name_1_version_serialized_-1"
+    if legacy_index in await collections.task_definitions.index_information():
+        logger.info(f"Dropping legacy task definition index {legacy_index}")
+        await collections.task_definitions.drop_index(legacy_index)
+    await collections.task_definitions.create_index([("name", 1), ("version", 1)], unique=True)
 
 
 async def init_db():
