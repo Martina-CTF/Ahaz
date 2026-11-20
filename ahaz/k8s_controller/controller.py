@@ -501,7 +501,9 @@ def stop_challenge(team_id: str, task_name: str) -> str:
         label_selector = f"task={task_name}"
 
         # Delete Pods
-        pod_list: V1PodList = core_api.list_namespaced_pod(namespace=get_namespace_name(team_id), label_selector=label_selector)
+        pod_list: V1PodList = core_api.list_namespaced_pod(
+            namespace=get_namespace_name(team_id), label_selector=label_selector
+        )
 
         if not pod_list.items:
             logger.info(f"No pods found with label task={task_name} in namespace {team_id}")
@@ -514,16 +516,22 @@ def stop_challenge(team_id: str, task_name: str) -> str:
                 core_api.delete_namespaced_pod(name=pod.metadata.name, namespace=get_namespace_name(team_id))
 
         # Delete Services
-        services = core_api.list_namespaced_service(namespace=get_namespace_name(team_id), label_selector=label_selector)
+        services = core_api.list_namespaced_service(
+            namespace=get_namespace_name(team_id), label_selector=label_selector
+        )
         for svc in services.items:
             logger.debug(f"Deleting Service: {svc.metadata.name}")
             core_api.delete_namespaced_service(name=svc.metadata.name, namespace=get_namespace_name(team_id))
 
         # Delete NetworkPolicies
-        policies = net_api.list_namespaced_network_policy(namespace=get_namespace_name(team_id), label_selector=label_selector)
+        policies = net_api.list_namespaced_network_policy(
+            namespace=get_namespace_name(team_id), label_selector=label_selector
+        )
         for policy in policies.items:
             logger.info(f"Deleting NetworkPolicy: {policy.metadata.name}")
-            net_api.delete_namespaced_network_policy(name=policy.metadata.name, namespace=get_namespace_name(team_id))
+            net_api.delete_namespaced_network_policy(
+                name=policy.metadata.name, namespace=get_namespace_name(team_id)
+            )
 
         logger.info(f"All resources with label task={task_name} deleted from namespace {team_id}")
         return f"All resources with label task={task_name} deleted from namespace {team_id}"
@@ -553,7 +561,9 @@ def check_namespaced_service_account_exists(namespace: str, service_account_name
     load_kube_config()
     try:
         core_api = CoreV1Api()
-        core_api.read_namespaced_service_account(name=service_account_name, namespace=get_namespace_name(namespace))
+        core_api.read_namespaced_service_account(
+            name=service_account_name, namespace=get_namespace_name(namespace)
+        )
         logger.debug(f"Service account {service_account_name} exists in namespace {namespace}")
         return True
     except ApiException as e:
@@ -604,7 +614,9 @@ def patch_namespaced_service_account(
 
     try:
         core_api = CoreV1Api()
-        core_api.patch_namespaced_service_account(name=service_account_name, namespace=get_namespace_name(namespace), body=body)
+        core_api.patch_namespaced_service_account(
+            name=service_account_name, namespace=get_namespace_name(namespace), body=body
+        )
         logger.debug(f"Patched service account {service_account_name} in namespace {namespace}")
     except ApiException as e:
         if e.status not in (403, 404):
